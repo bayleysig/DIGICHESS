@@ -7,6 +7,9 @@
   <link rel="stylesheet" href="style.css" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <!-- Firebase SDK -->
+  <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-app.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.0/firebase-database.js"></script>
 </head>
 <body>
 
@@ -28,6 +31,10 @@
       <button class="nav-btn active" id="btnPVP" onclick="setGameMode('pvp')">
         <svg viewBox="0 0 20 20" fill="currentColor" width="16" height="16"><path d="M9 6a3 3 0 11-6 0 3 3 0 016 0zM17 6a3 3 0 11-6 0 3 3 0 016 0zM12.93 17c.046-.327.07-.66.07-1a6.97 6.97 0 00-1.5-4.33A5 5 0 0119 16v1h-6.07zM6 11a5 5 0 015 5v1H1v-1a5 5 0 015-5z"/></svg>
         Player vs Player
+      </button>
+      <button class="nav-btn" id="btnFriend" onclick="openFriendModal()">
+        <svg viewBox="0 0 20 20" fill="currentColor" width="16" height="16"><path d="M13 6a3 3 0 11-6 0 3 3 0 016 0zM18 8a2 2 0 11-4 0 2 2 0 014 0zM14 15a4 4 0 00-8 0v1h8v-1zM6 8a2 2 0 11-4 0 2 2 0 014 0zM16 18v-1a5.972 5.972 0 00-.75-2.906A3.005 3.005 0 0119 15v1h-3zM4.75 12.094A5.973 5.973 0 004 15v1H1v-1a3 3 0 013.75-2.906z"/></svg>
+        Play vs Friend
       </button>
       <button class="nav-btn" id="btnAI" onclick="setGameMode('ai')">
         <svg viewBox="0 0 20 20" fill="currentColor" width="16" height="16"><path d="M13 6a3 3 0 11-6 0 3 3 0 016 0zM18 8a2 2 0 11-4 0 2 2 0 014 0zM14 15a4 4 0 00-8 0v1h8v-1zM6 8a2 2 0 11-4 0 2 2 0 014 0zM16 18v-1a5.972 5.972 0 00-.75-2.906A3.005 3.005 0 0119 15v1h-3zM4.75 12.094A5.973 5.973 0 004 15v1H1v-1a3 3 0 013.75-2.906z"/></svg>
@@ -187,6 +194,58 @@
       <div class="modal-actions">
         <button class="btn btn-primary" onclick="newGame()">Play Again</button>
         <button class="btn btn-ghost" onclick="closeModal('gameOverModal')">Dismiss</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════
+       PLAY VS FRIEND MODAL
+  ══════════════════════════════════════ -->
+  <div class="modal-overlay" id="friendModal" style="display:none;">
+    <div class="modal">
+      <h2 class="modal-title">Play vs Friend</h2>
+      <p class="modal-sub">Create or join a game</p>
+      
+      <div class="friend-modal-content">
+        <!-- Create Game Tab -->
+        <div class="friend-section">
+          <h3 class="friend-section-title">Create New Game</h3>
+          <button class="btn btn-primary" onclick="createFriendGame()" style="width: 100%;">
+            Generate Join Code
+          </button>
+          <div class="join-code-display" id="joinCodeDisplay" style="display:none;">
+            <p style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 8px;">Your Join Code</p>
+            <div class="join-code-box" id="joinCodeBox"></div>
+            <button class="btn btn-sm btn-ghost" onclick="copyJoinCode()" style="width: 100%; margin-top: 8px;">
+              Copy Code
+            </button>
+            <p style="font-size: 0.7rem; color: var(--text-muted); text-align: center; margin-top: 8px;">
+              Share this code with your friend
+            </p>
+          </div>
+        </div>
+
+        <!-- Join Game Tab -->
+        <div class="friend-section" style="margin-top: 16px; border-top: 1px solid var(--border); padding-top: 16px;">
+          <h3 class="friend-section-title">Join Existing Game</h3>
+          <div class="friend-input-group">
+            <input 
+              type="text" 
+              id="friendJoinCode" 
+              placeholder="Enter 4-digit code" 
+              maxlength="4"
+              class="friend-join-input"
+            />
+            <button class="btn btn-primary" onclick="joinFriendGame()" style="width: 100%; margin-top: 8px;">
+              Join Game
+            </button>
+          </div>
+          <div id="joinError" style="color: var(--danger); font-size: 0.75rem; margin-top: 8px; display: none;"></div>
+        </div>
+      </div>
+
+      <div class="modal-actions" style="margin-top: 16px;">
+        <button class="btn btn-ghost" onclick="closeModal('friendModal')">Cancel</button>
       </div>
     </div>
   </div>

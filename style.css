@@ -632,6 +632,66 @@ body {
   transform: scale(1.08);
 }
 
+/* ── FRIEND MODAL ── */
+.friend-modal-content {
+  margin: 16px 0;
+}
+.friend-section {
+  text-align: left;
+}
+.friend-section-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 12px;
+}
+.join-code-display {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px;
+  margin-top: 12px;
+}
+.join-code-box {
+  font-family: 'Inter', monospace;
+  font-size: 2.4rem;
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-align: center;
+  color: var(--green);
+  padding: 16px;
+  background: var(--bg-card);
+  border: 2px solid var(--green);
+  border-radius: var(--radius);
+  user-select: all;
+}
+.friend-input-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.friend-join-input {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-panel);
+  color: var(--text-primary);
+  font-size: 1rem;
+  font-family: 'Inter', monospace;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-align: center;
+  outline: none;
+  transition: all 0.15s;
+}
+.friend-join-input:focus {
+  border-color: var(--green);
+  box-shadow: 0 0 0 3px var(--green-glow);
+}
+.friend-join-input::placeholder {
+  color: var(--text-muted);
+}
+
 /* ── RESPONSIVE ── */
 @media (max-width: 900px) {
   .game-layout {

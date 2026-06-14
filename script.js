@@ -4,8 +4,21 @@
    Architecture allows easy Stockfish AI integration later.
 ═══════════════════════════════════════════════════════════ */
 
+/* ── FIREBASE INITIALIZATION ── */
+const firebaseConfig = {
+  apiKey: "AIzaSyBWCRgFXvIpjKq9mXJYouYp20hqv-jKyH0",
+  authDomain: "digichess-e858b.firebaseapp.com",
+  projectId: "digichess-e858b",
+  storageBucket: "digichess-e858b.firebasestorage.app",
+  messagingSenderId: "689026321934",
+  appId: "1:689026321934:web:a3656a9dcf581ab727b65f"
+};
+
+firebase.initializeApp(firebaseConfig);
+const db = firebase.database();
+
 /* ── GAME MODE ── (change to 'ai' for future Stockfish support) */
-let gameMode = "pvp"; // "pvp" | "ai"
+let gameMode = "pvp"; // "pvp" | "ai" | "friend"
 
 /* ══════════════════════════════════════════
    CONSTANTS & PIECE DEFINITIONS
@@ -52,6 +65,13 @@ let timerBlackSecs  = 600;
 let timerInterval   = null;
 let timersRunning   = false;
 let timerLimitSecs  = 600;
+
+// Multiplayer state
+let friendJoinCode  = null;        // current game's join code
+let playerId        = null;        // unique ID for this player
+let friendGameRef   = null;        // reference to current game in Firebase
+let gameListener    = null;        // listener reference for unsubscribe
+let myColor         = null;        // 'w' or 'b' when playing with friend
 
 /* ══════════════════════════════════════════
    INITIALIZATION
@@ -343,6 +363,11 @@ function finishMove(notation) {
   // Replace makeAIMove() body with Stockfish integration.
   if (gameMode === 'ai' && currentTurn === 'b' && !gameOver) {
     setTimeout(makeAIMove, 400);
+  }
+  
+  // Sync to Firebase if playing with friend
+  if (gameMode === 'friend') {
+    syncMoveToFriend(notation);
   }
 }
 
@@ -870,20 +895,31 @@ function formatTime(secs) {
    GAME MODE
 ══════════════════════════════════════════ */
 function setGameMode(mode) {
+  if (mode === 'friend') {
+    openFriendModal();
+    return;
+  }
+  
+  if (mode === 'ai') {
+    const banner = document.getElementById('aiBanner');
+    banner.style.display = 'flex';
+    return;
+  }
+  
+  if (gameMode === 'friend') {
+    exitFriendGame();
+  }
+  
   gameMode = mode;
-
   document.getElementById('btnPVP').classList.toggle('active', mode === 'pvp');
   document.getElementById('btnAI').classList.toggle('active',  mode === 'ai');
-  document.getElementById('aiBanner').style.display = mode === 'ai' ? 'flex' : 'none';
-
   updateGameInfo();
-
-  // Start a new game when switching mode
   newGame();
 }
 
 function dismissAIBanner() {
   document.getElementById('aiBanner').style.display = 'none';
+  setGameMode('pvp');
 }
 
 /* ══════════════════════════════════════════
@@ -1030,6 +1066,163 @@ document.addEventListener('keydown', e => {
 });
 
 /* ══════════════════════════════════════════
+   MULTIPLAYER FUNCTIONS
+══════════════════════════════════════════ */
+
+function generatePlayerId() {
+  return 'player_' + Math.random().toString(36).substr(2, 9) + '_' + Date.now();
+}
+
+function generateJoinCode() {
+  return Math.floor(1000 + Math.random() * 9000).toString();
+}
+
+function openFriendModal() {
+  document.getElementById('friendModal').style.display = 'flex';
+  document.getElementById('joinError').style.display = 'none';
+  document.getElementById('joinCodeDisplay').style.display = 'none';
+  document.getElementById('friendJoinCode').value = '';
+}
+
+function createFriendGame() {
+  playerId = generatePlayerId();
+  friendJoinCode = generateJoinCode();
+  myColor = 'w';
+  gameMode = 'friend';
+  
+  const gameData = {
+    players: { player1: playerId },
+    colors: { [playerId]: 'w' },
+    board: INITIAL_BOARD,
+    currentTurn: 'w',
+    moveHistory: [],
+    gameOver: false,
+    createdAt: firebase.database.ServerValue.TIMESTAMP
+  };
+  
+  db.ref(`games/${friendJoinCode}`).set(gameData).then(() => {
+    document.getElementById('joinCodeBox').textContent = friendJoinCode;
+    document.getElementById('joinCodeDisplay').style.display = 'block';
+    setupGameListener(friendJoinCode);
+  });
+}
+
+function joinFriendGame() {
+  const code = document.getElementById('friendJoinCode').value.trim();
+  const errorEl = document.getElementById('joinError');
+  
+  if (code.length !== 4 || !/^\d+$/.test(code)) {
+    errorEl.textContent = 'Please enter a valid 4-digit code';
+    errorEl.style.display = 'block';
+    return;
+  }
+  
+  db.ref(`games/${code}`).once('value').then(snapshot => {
+    if (!snapshot.exists()) {
+      errorEl.textContent = 'Game not found. Check your code.';
+      errorEl.style.display = 'block';
+      return;
+    }
+    
+    const gameData = snapshot.val();
+    if (Object.keys(gameData.players).length >= 2) {
+      errorEl.textContent = 'Game is full. Can\'t join.';
+      errorEl.style.display = 'block';
+      return;
+    }
+    
+    playerId = generatePlayerId();
+    friendJoinCode = code;
+    myColor = 'b';
+    gameMode = 'friend';
+    
+    const updates = {};
+    updates[`games/${code}/players/player2`] = playerId;
+    updates[`games/${code}/colors/${playerId}`] = 'b';
+    
+    db.ref().update(updates).then(() => {
+      document.getElementById('friendModal').style.display = 'none';
+      setupGameListener(friendJoinCode);
+    });
+  });
+}
+
+function setupGameListener(code) {
+  friendGameRef = db.ref(`games/${code}`);
+  
+  if (gameListener) {
+    friendGameRef.off('value', gameListener);
+  }
+  
+  gameListener = friendGameRef.on('value', snapshot => {
+    if (!snapshot.exists()) return;
+    
+    const gameData = snapshot.val();
+    
+    // Load board state
+    board = gameData.board.map(r => [...r]);
+    currentTurn = gameData.currentTurn;
+    moveHistory = gameData.moveHistory || [];
+    gameOver = gameData.gameOver;
+    
+    // Check if second player joined
+    if (Object.keys(gameData.players).length === 2 && !friendJoinCode) {
+      friendJoinCode = code;
+    }
+    
+    renderBoard();
+    renderMoveHistory();
+    updateStatusBar();
+    updateGameInfo();
+  });
+  
+  initGame();
+  closeModal('friendModal');
+}
+
+function syncMoveToFriend(notation) {
+  if (!friendGameRef || gameMode !== 'friend') return;
+  
+  const updates = {
+    board: board,
+    currentTurn: currentTurn,
+    moveHistory: moveHistory,
+    gameOver: gameOver
+  };
+  
+  friendGameRef.update(updates);
+}
+
+function exitFriendGame() {
+  if (gameListener && friendGameRef) {
+    friendGameRef.off('value', gameListener);
+  }
+  friendJoinCode = null;
+  playerId = null;
+  gameListener = null;
+  myColor = null;
+  gameMode = 'pvp';
+  newGame();
+}
+
+function copyJoinCode() {
+  const code = document.getElementById('joinCodeBox').textContent;
+  navigator.clipboard.writeText(code).then(() => {
+    alert('Join code copied to clipboard!');
+  });
+}
+
+/* ══════════════════════════════════════════
+   CLOSE MODALS ON OVERLAY CLICK
+══════════════════════════════════════════ */
+['gameOverModal', 'friendModal'].forEach(id => {
+  document.getElementById(id)?.addEventListener('click', function(e) {
+    if (e.target === this && id !== 'friendModal') closeModal(id);
+  });
+});
+
+/* ══════════════════════════════════════════
    START
 ══════════════════════════════════════════ */
+playerId = generatePlayerId();
 initGame();
