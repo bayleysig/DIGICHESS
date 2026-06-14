@@ -1264,9 +1264,23 @@ playerId = generatePlayerId();
 // Initialize the game
 initGame();
 
-// Initialize Firebase asynchronously (non-blocking)
-setTimeout(() => {
-  if (typeof firebase !== 'undefined') {
+// Initialize Firebase asynchronously with retries
+function initFirebaseWithRetry(attempts = 0) {
+  if (typeof firebase !== 'undefined' && firebase.apps) {
     initFirebase();
+    console.log('Firebase initialized successfully');
+  } else if (attempts < 10) {
+    setTimeout(() => initFirebaseWithRetry(attempts + 1), 500);
+  } else {
+    console.error('Firebase SDK failed to load after 10 attempts');
   }
-}, 100);
+}
+
+// Wait for Firebase SDK to be available
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', () => {
+    initFirebaseWithRetry();
+  });
+} else {
+  initFirebaseWithRetry();
+}
