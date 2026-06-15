@@ -404,17 +404,19 @@
       <div class="account-divider"></div>
 
       <!-- Sign Out -->
-      <div class="account-section" style="text-align:center;">
+      <div class="account-section" style="text-align:center; padding-bottom:8px;">
         <button class="btn btn-ghost" onclick="signOutUser(); closeModal('accountModal');">
           Sign Out
         </button>
       </div>
 
       <!-- Delete Account -->
-      <div class="account-section" style="text-align:center;">
+      <div class="account-section" style="text-align:center; padding-top:8px;">
         <div id="deleteAccountError" class="auth-error" style="display:none;"></div>
         <button class="btn btn-danger" id="deleteAccountBtn" onclick="handleDeleteAccount()">Delete Account</button>
       </div>
+
+      <div class="account-divider"></div>
 
       <div class="modal-actions" style="margin-top:16px;">
         <button class="btn btn-ghost" onclick="closeModal('accountModal')">Close</button>
