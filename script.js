@@ -1100,6 +1100,20 @@ document.addEventListener('keydown', e => {
    ADDITIONAL MULTIPLAYER FUNCTIONS
 ══════════════════════════════════════════ */
 
+// Firebase drops null values from arrays, so we encode null as "." for storage
+function boardToFirebase(b) {
+  return b.map(row => row.map(sq => sq === null ? '.' : sq));
+}
+
+function boardFromFirebase(raw) {
+  // raw may be a plain object (Firebase converts arrays to objects keyed by index)
+  const rows = Array.isArray(raw) ? raw : Object.keys(raw).sort((a,b) => Number(a)-Number(b)).map(k => raw[k]);
+  return rows.map(row => {
+    const cols = Array.isArray(row) ? row : Object.keys(row).sort((a,b) => Number(a)-Number(b)).map(k => row[k]);
+    return cols.map(sq => (sq === '.' || sq === undefined || sq === null) ? null : sq);
+  });
+}
+
 function createFriendGame() {
   console.log('createFriendGame called, db =', db);
   
@@ -1118,7 +1132,7 @@ function createFriendGame() {
   const gameData = {
     players: { player1: playerId },
     colors: { [playerId]: 'w' },
-    board: INITIAL_BOARD,
+    board: boardToFirebase(INITIAL_BOARD),
     currentTurn: 'w',
     moveHistory: [],
     gameOver: false,
@@ -1200,17 +1214,8 @@ function setupGameListener(code, closeOnStart) {
     
     const gameData = snapshot.val();
     
-    // Firebase stores arrays as objects keyed by index — convert back to arrays
-    const rawBoard = gameData.board;
-    const parsedBoard = Object.keys(rawBoard)
-      .sort((a, b) => Number(a) - Number(b))
-      .map(rowKey => {
-        const row = rawBoard[rowKey];
-        if (Array.isArray(row)) return [...row];
-        return Object.keys(row)
-          .sort((a, b) => Number(a) - Number(b))
-          .map(colKey => row[colKey] === undefined ? null : row[colKey]);
-      });
+    // Parse board, converting "." placeholders back to null
+    const parsedBoard = boardFromFirebase(gameData.board);
 
     // If this is the host's first update (game just created), only close
     // the modal once a second player joins so the host can share the code.
@@ -1251,7 +1256,7 @@ function syncMoveToFriend(notation) {
   
   try {
     const updates = {
-      board: board,
+      board: boardToFirebase(board),
       currentTurn: currentTurn,
       moveHistory: moveHistory,
       gameOver: gameOver
