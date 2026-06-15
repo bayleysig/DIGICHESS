@@ -2553,8 +2553,17 @@ function findMatch() {
         // Update matchmaking text while game starts
         document.getElementById('matchmakingText').textContent = `Found ${opponentUsername}! Loading…`;
 
-        // Start the game listener (closeOnStart=false → wait for joiner write)
-        setupGameListener(code, false);
+        // Close the modal now — don't wait for setupGameListener to do it
+        // (avoids the closeModal→cancelMatchmaking guard firing)
+        document.getElementById('friendModal').style.display = 'none';
+
+        // Start the game listener — creator is black, waits for joiner's write
+        // Use closeOnStart=true here too: the game was just created with
+        // both usernames already in gameData, so we just need the listener
+        // to start the game immediately when the joiner writes players/joiner.
+        // We use a short poll: try closeOnStart=true since we already wrote
+        // both usernames; the joiner will write players/joiner very shortly.
+        setupGameListener(code, true);
 
       } catch (err) {
         console.error('Matchmaking transaction error:', err);
@@ -2568,7 +2577,7 @@ function findMatch() {
       const data = snap.val();
       if (!data || !data.joinCode) return;
 
-      // Remove the notification immediately
+      // Remove the notification immediately (fire-and-forget)
       db.ref(`users/${uid}/quickPlayGame`).remove();
 
       // Stop our own queue listener — the other player already claimed us
@@ -2585,8 +2594,7 @@ function findMatch() {
       joinerUsername = currentUsername;
       hostUsername   = data.hostUsername || 'Opponent';
 
-      document.getElementById('matchmakingText').textContent = `Found ${hostUsername}! Loading…`;
-
+      // Write joiner entry into game room
       const updates = {};
       updates[`games/${code}/players/joiner`]     = uid;
       updates[`games/${code}/usernames/joiner`]   = currentUsername;
@@ -2594,7 +2602,8 @@ function findMatch() {
 
       await db.ref().update(updates);
 
-      closeModal('friendModal');
+      // Close modal directly (bypasses cancelMatchmaking guard since listener is null)
+      document.getElementById('friendModal').style.display = 'none';
       setupGameListener(code, true);
     });
 }
@@ -2762,7 +2771,9 @@ function setupGameListener(code, closeOnStart) {
       if (!closeOnStart && playerCount < 2) return;
 
       gameStarted = true;
-      closeModal('friendModal');
+      // Hide the modal directly — avoids closeModal() triggering cancelMatchmaking()
+      const fModal = document.getElementById('friendModal');
+      if (fModal) fModal.style.display = 'none';
 
       // White (joiner): isFlipped = false → white at bottom
       // Black (host):   isFlipped = true  → black at bottom
