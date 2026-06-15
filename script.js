@@ -2539,6 +2539,11 @@ function findMatch() {
       const opponentUid = snap.key;
       if (opponentUid === uid) return;
 
+      // Claim the slot synchronously before any await — this prevents the
+      // joiner path (quickPlayGame listener) from also winning the race.
+      // If paired was set between here and the transaction result, we abort.
+      paired = true;
+
       // Atomically claim the opponent by removing their entry
       const claimRef = db.ref(`matchmaking/${opponentUid}`);
       let result;
@@ -2548,16 +2553,15 @@ function findMatch() {
           return null;                  // claim it
         });
       } catch (e) {
+        paired = false; // transaction failed — release so joiner path can proceed
         return;
       }
-      if (!result.committed) return;   // someone else got there first
 
-      if (paired) {
-        // We already got paired via the quickPlayGame path — put them back
-        db.ref(`matchmaking/${opponentUid}`).set(result.snapshot.val());
+      if (!result.committed) {
+        // Someone else already removed this opponent — release and wait
+        paired = false;
         return;
       }
-      paired = true;
 
       const opponentName = result.snapshot.val()?.username || 'Opponent';
 
@@ -2614,7 +2618,7 @@ function findMatch() {
         const data = snap.val();
         if (!data || !data.joinCode) return;
         if (paired) return;
-        paired = true;
+        paired = true;  // claim synchronously before any await
 
         db.ref(`users/${uid}/quickPlayGame`).remove();
         await myRef.remove();
@@ -2645,7 +2649,8 @@ function findMatch() {
 
 function stopMatchmakingListener() {
   if (matchmakingListener) {
-    db.ref('matchmaking').off('child_added', matchmakingListener);
+    // Must use the same query ref that was used to attach the listener
+    db.ref('matchmaking').orderByChild('joinedAt').off('child_added', matchmakingListener);
     matchmakingListener = null;
   }
   if (quickPlayGameListener && currentUser) {
