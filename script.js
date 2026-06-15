@@ -1129,7 +1129,7 @@ function createFriendGame() {
     console.log('Game created successfully');
     document.getElementById('joinCodeBox').textContent = friendJoinCode;
     document.getElementById('joinCodeDisplay').style.display = 'block';
-    setupGameListener(friendJoinCode);
+    setupGameListener(friendJoinCode, false); // false = keep modal open until friend joins
   }).catch(err => {
     console.error('Error creating game:', err);
     alert('Error creating game: ' + err.message);
@@ -1176,12 +1176,12 @@ function joinFriendGame() {
     
     db.ref().update(updates).then(() => {
       document.getElementById('friendModal').style.display = 'none';
-      setupGameListener(friendJoinCode);
+      setupGameListener(friendJoinCode, true); // true = close modal immediately for joiner
     });
   });
 }
 
-function setupGameListener(code) {
+function setupGameListener(code, closeOnStart) {
   if (!db) {
     console.error('Firebase not initialized');
     return;
@@ -1193,24 +1193,57 @@ function setupGameListener(code) {
     friendGameRef.off('value', gameListener);
   }
   
+  let firstUpdate = true;
+  
   gameListener = friendGameRef.on('value', snapshot => {
     if (!snapshot.exists()) return;
     
     const gameData = snapshot.val();
     
-    // Load board state
-    board = gameData.board.map(r => [...r]);
+    // Firebase stores arrays as objects keyed by index — convert back to arrays
+    const rawBoard = gameData.board;
+    const parsedBoard = Object.keys(rawBoard)
+      .sort((a, b) => Number(a) - Number(b))
+      .map(rowKey => {
+        const row = rawBoard[rowKey];
+        if (Array.isArray(row)) return [...row];
+        return Object.keys(row)
+          .sort((a, b) => Number(a) - Number(b))
+          .map(colKey => row[colKey] === undefined ? null : row[colKey]);
+      });
+
+    // If this is the host's first update (game just created), only close
+    // the modal once a second player joins so the host can share the code.
+    const playerCount = gameData.players ? Object.keys(gameData.players).length : 1;
+
+    if (firstUpdate) {
+      firstUpdate = false;
+      if (closeOnStart || playerCount >= 2) {
+        closeModal('friendModal');
+        board = parsedBoard;
+        currentTurn = gameData.currentTurn;
+        moveHistory = Array.isArray(gameData.moveHistory) ? gameData.moveHistory : Object.values(gameData.moveHistory || {});
+        gameOver = gameData.gameOver;
+        renderBoard();
+        renderMoveHistory();
+        updateStatusBar();
+        updateGameInfo();
+      }
+      // If host and waiting for friend, leave modal open — do nothing yet
+      return;
+    }
+
+    // Subsequent updates: always apply and close modal if still open
+    closeModal('friendModal');
+    board = parsedBoard;
     currentTurn = gameData.currentTurn;
-    moveHistory = gameData.moveHistory || [];
+    moveHistory = Array.isArray(gameData.moveHistory) ? gameData.moveHistory : Object.values(gameData.moveHistory || {});
     gameOver = gameData.gameOver;
-    
     renderBoard();
     renderMoveHistory();
     updateStatusBar();
     updateGameInfo();
   });
-  
-  closeModal('friendModal');
 }
 
 function syncMoveToFriend(notation) {
