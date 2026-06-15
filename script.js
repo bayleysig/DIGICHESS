@@ -1307,6 +1307,46 @@ async function handleSignIn() {
   }
 }
 
+async function signInWithGoogle() {
+  try {
+    const provider = new firebase.auth.GoogleAuthProvider();
+    const cred     = await firebase.auth().signInWithPopup(provider);
+    const user     = cred.user;
+    const uid      = user.uid;
+
+    // Check if this Google user already has a username stored
+    const snap = await db.ref(`users/${uid}/username`).once('value');
+    if (!snap.exists()) {
+      // First time — derive a username from their Google display name
+      let base = (user.displayName || 'player')
+        .toLowerCase()
+        .replace(/[^a-z0-9_]/g, '_')
+        .substring(0, 18);
+
+      // Ensure uniqueness by appending digits if taken
+      let username = base;
+      let attempt  = 0;
+      while (true) {
+        const taken = await db.ref(`usernames/${username}`).once('value');
+        if (!taken.exists()) break;
+        attempt++;
+        username = base.substring(0, 15) + '_' + attempt;
+      }
+
+      await db.ref(`users/${uid}/username`).set(username);
+      await db.ref(`usernames/${username}`).set(uid);
+    }
+
+    closeModal('authModal');
+  } catch (err) {
+    // user closed the popup — not a real error worth alerting about
+    if (err.code !== 'auth/popup-closed-by-user' && err.code !== 'auth/cancelled-popup-request') {
+      console.error('Google sign-in error:', err);
+      alert('Google sign-in failed. Please try again.');
+    }
+  }
+}
+
 async function continueAsGuest() {
   try {
     // Sign in anonymously — Firebase creates a temporary account
