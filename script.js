@@ -2002,6 +2002,11 @@ function setupGameListener(code, closeOnStart) {
       : Object.values(gameData.moveHistory || {});
     gameOver    = gameData.gameOver;
 
+    // Restore lastMove so the opponent's move gets highlighted
+    if (gameData.lastMove) {
+      lastMove = gameData.lastMove;
+    }
+
     renderBoard();
     renderMoveHistory();
     updateStatusBar();
@@ -2019,10 +2024,11 @@ function syncMoveToFriend(notation) {
 
   try {
     const updates = {
-      board: boardToFirebase(board),
+      board:       boardToFirebase(board),
       currentTurn: currentTurn,
       moveHistory: moveHistory,
-      gameOver: gameOver
+      gameOver:    gameOver,
+      lastMove:    lastMove || null
     };
     
     friendGameRef.update(updates);
