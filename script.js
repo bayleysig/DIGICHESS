@@ -2526,6 +2526,10 @@ function findMatch() {
       const opponentUid = snap.key;
       if (opponentUid === uid) return;
 
+      // Save opponent data NOW before the transaction wipes it
+      const opponentData = snap.val() || {};
+      const opponentName = opponentData.username || null;
+
       paired = true; // claim synchronously before any await
 
       let result;
@@ -2538,7 +2542,17 @@ function findMatch() {
 
       if (!result.committed) { paired = false; return; }
 
-      const opponentName = (result.snapshot.val() || {}).username || 'Opponent';
+      // Use the name we captured from the snapshot (transaction result loses original data)
+      // Fall back to fetching from DB if the queue entry had no username
+      let resolvedOpponentName = opponentName;
+      if (!resolvedOpponentName) {
+        try {
+          const nameSnap = await db.ref(`users/${opponentUid}/username`).once('value');
+          resolvedOpponentName = nameSnap.val() || 'Guest';
+        } catch (_) {
+          resolvedOpponentName = 'Guest';
+        }
+      }
 
       await myRef.remove();
       stopMatchmakingListener();
@@ -2550,14 +2564,14 @@ function findMatch() {
       gameMode       = 'friend';
       playerId       = uid;
       friendJoinCode = generateJoinCode();
-      hostUsername   = iAmBlack ? myUsername   : opponentName;
-      joinerUsername = iAmBlack ? opponentName : myUsername;
+      hostUsername   = iAmBlack ? myUsername             : resolvedOpponentName;
+      joinerUsername = iAmBlack ? resolvedOpponentName   : myUsername;
 
       const gameData = {
         players:     { host:   iAmBlack ? uid         : opponentUid,
                        joiner: iAmBlack ? opponentUid : uid },
-        usernames:   { host:   iAmBlack ? myUsername   : opponentName,
-                       joiner: iAmBlack ? opponentName : myUsername },
+        usernames:   { host:   iAmBlack ? myUsername           : resolvedOpponentName,
+                       joiner: iAmBlack ? resolvedOpponentName : myUsername },
         colors:      { [uid]: myColor, [opponentUid]: iAmBlack ? 'w' : 'b' },
         hostColor:   'b',
         timeControl: QP_TIME_SECS,
@@ -2571,7 +2585,7 @@ function findMatch() {
 
       await db.ref(`games/${friendJoinCode}`).set(gameData);
 
-      document.getElementById('matchmakingText').textContent = `Found ${opponentName}! Loading\u2026`;
+      document.getElementById('matchmakingText').textContent = `Found ${resolvedOpponentName}! Loading…`;
       document.getElementById('friendModal').style.display   = 'none';
       setupGameListener(friendJoinCode, true);
     };
@@ -2588,34 +2602,30 @@ function findMatch() {
 
       stopMatchmakingListener();
 
-      // Scan games/ for the room created for us (try joiner slot first)
-      let code = null, gameData = null;
-
-      const joinerSnap = await db.ref('games')
-        .orderByChild('players/joiner').equalTo(uid)
-        .limitToLast(3).once('value');
-      if (joinerSnap.exists()) {
-        joinerSnap.forEach(s => { code = s.key; gameData = s.val(); });
-      }
-
-      if (!code) {
-        const hostSnap = await db.ref('games')
-          .orderByChild('players/host').equalTo(uid)
-          .limitToLast(3).once('value');
-        if (hostSnap.exists()) {
-          hostSnap.forEach(s => { code = s.key; gameData = s.val(); });
+      // Scan games/ for the room created for us
+      // Check both host and joiner slots since color is assigned by UID sort
+      const findMyGame = async () => {
+        let code = null, gameData = null;
+        const checks = [
+          db.ref('games').orderByChild('players/joiner').equalTo(uid).limitToLast(3).once('value'),
+          db.ref('games').orderByChild('players/host').equalTo(uid).limitToLast(3).once('value')
+        ];
+        const results = await Promise.all(checks);
+        for (const snap of results) {
+          if (snap.exists()) {
+            snap.forEach(s => { code = s.key; gameData = s.val(); });
+            if (code) break;
+          }
         }
-      }
+        return { code, gameData };
+      };
+
+      let { code, gameData } = await findMyGame();
 
       if (!code || !gameData) {
-        // Retry once after a short wait
+        // Retry after a short wait — game may not be written yet
         await new Promise(r => setTimeout(r, 1500));
-        const retrySnap = await db.ref('games')
-          .orderByChild('players/joiner').equalTo(uid)
-          .limitToLast(3).once('value');
-        if (retrySnap.exists()) {
-          retrySnap.forEach(s => { code = s.key; gameData = s.val(); });
-        }
+        ({ code, gameData } = await findMyGame());
       }
 
       if (!code || !gameData) {
@@ -2926,7 +2936,9 @@ function setupGameListener(code, closeOnStart) {
 }
 
 function syncMoveToFriend(notation) {
-  if (!db || !friendGameRef || gameMode !== 'friend') return;
+  if (!db) { console.warn('syncMove: no db'); return; }
+  if (!friendGameRef) { console.warn('syncMove: no friendGameRef'); return; }
+  if (gameMode !== 'friend') { console.warn('syncMove: gameMode is', gameMode); return; }
   
   // Only sync after our own move (the turn just switched away from us)
   const weJustMoved = (myColor === 'w' && currentTurn === 'b') || (myColor === 'b' && currentTurn === 'w');
@@ -2940,8 +2952,10 @@ function syncMoveToFriend(notation) {
     lastMove:    lastMove || null
   };
 
-  friendGameRef.update(updates).catch(err => {
-    console.error('syncMoveToFriend failed:', err.code, err.message);
+  friendGameRef.update(updates).then(() => {
+    console.log('syncMove: success, turn now', currentTurn);
+  }).catch(err => {
+    console.error('syncMove FAILED:', err.code, err.message);
   });
 }
 
