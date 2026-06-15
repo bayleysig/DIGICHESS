@@ -1665,8 +1665,11 @@ function toggleFriendMenu(e, fuid) {
 }
 
 // Close ⋯ menus when clicking elsewhere
-document.addEventListener('click', () => {
-  document.querySelectorAll('.friend-more-menu').forEach(m => m.style.display = 'none');
+document.addEventListener('click', (e) => {
+  // Only close if the click was not inside a friend-more-wrap
+  if (!e.target.closest('.friend-more-wrap')) {
+    document.querySelectorAll('.friend-more-menu').forEach(m => m.style.display = 'none');
+  }
 });
 
 async function sendMatchRequest(toUid, toUsername) {
