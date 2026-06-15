@@ -1101,6 +1101,8 @@ document.addEventListener('keydown', e => {
 ══════════════════════════════════════════ */
 
 function createFriendGame() {
+  console.log('createFriendGame called, db =', db);
+  
   if (!db) {
     alert('Firebase not initialized. Please refresh the page.');
     return;
@@ -1110,6 +1112,8 @@ function createFriendGame() {
   friendJoinCode = generateJoinCode();
   myColor = 'w';
   gameMode = 'friend';
+  
+  console.log('Creating game with code:', friendJoinCode);
   
   const gameData = {
     players: { player1: playerId },
@@ -1122,9 +1126,13 @@ function createFriendGame() {
   };
   
   db.ref(`games/${friendJoinCode}`).set(gameData).then(() => {
+    console.log('Game created successfully');
     document.getElementById('joinCodeBox').textContent = friendJoinCode;
     document.getElementById('joinCodeDisplay').style.display = 'block';
     setupGameListener(friendJoinCode);
+  }).catch(err => {
+    console.error('Error creating game:', err);
+    alert('Error creating game: ' + err.message);
   });
 }
 
