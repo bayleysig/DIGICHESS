@@ -991,3 +991,52 @@ body {
 .add-friend-btn:hover { background: var(--green-glow); }
 
 .player-name-row { align-items: center; }
+
+/* ══════════════════════════════════════════
+   ACCOUNT SETTINGS MODAL
+══════════════════════════════════════════ */
+.account-modal {
+  width: 100%;
+  max-width: 420px;
+  padding: 28px 28px 20px;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.account-section {
+  margin-bottom: 4px;
+}
+
+.account-section-title {
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-secondary);
+  margin-bottom: 12px;
+}
+
+.account-section-danger {
+  color: var(--danger);
+}
+
+.account-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 18px 0;
+}
+
+.account-action-btn {
+  width: 100%;
+  margin-top: 4px;
+}
+
+.account-success {
+  background: rgba(77, 158, 94, 0.12);
+  border: 1px solid rgba(77, 158, 94, 0.3);
+  border-radius: var(--radius);
+  color: var(--green-bright);
+  font-size: 0.8rem;
+  padding: 8px 12px;
+  margin-bottom: 10px;
+}
