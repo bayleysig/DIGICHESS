@@ -148,10 +148,11 @@ function openPlayOnlineModal() {
   const modal = document.getElementById('friendModal');
   modal.style.display = 'flex';
   // Reset state on open
-  document.getElementById('joinError').style.display = 'none';
-  document.getElementById('joinCodeDisplay').style.display = 'none';
-  document.getElementById('friendJoinCode').value = '';
-  document.getElementById('matchmakingStatus').style.display = 'none';
+  document.getElementById('joinError').style.display          = 'none';
+  document.getElementById('joinCodeDisplay').style.display    = 'none';
+  document.getElementById('friendJoinCode').value             = '';
+  document.getElementById('matchmakingStatus').style.display  = 'none';
+  document.getElementById('qpIdle').style.display             = 'block';
 }
 
 // Keep old name working (used internally by acceptMatchRequest flow)
@@ -1127,6 +1128,10 @@ function dismissAIBanner() {
 ══════════════════════════════════════════ */
 function closeModal(id) {
   document.getElementById(id).style.display = 'none';
+  // If the Play Online modal is closed while matchmaking, cancel the search
+  if (id === 'friendModal' && matchmakingListener) {
+    cancelMatchmaking();
+  }
 }
 
 /* ══════════════════════════════════════════
@@ -2430,27 +2435,188 @@ function setColorChoice(color) {
   document.getElementById('colorChoiceRandom').classList.toggle('active', color === 'r');
 }
 
-/**
- * Find Match — stub for future matchmaking implementation.
- * Shows the searching UI; replace the body with real Firebase queue logic.
- */
-function findMatch(category, timeControl) {
+/* ── QUICK PLAY MATCHMAKING ──────────────────────────────────
+ *
+ * Firebase structure used:
+ *   matchmaking/{uid} = { username, joinedAt }
+ *
+ * Flow:
+ *  1. Player A clicks Find Match → writes their entry to matchmaking/.
+ *  2. Player A listens on matchmaking/ with child_added.
+ *  3. Player B clicks Find Match → writes their entry.
+ *  4. Player A's listener fires with Player B's entry.
+ *     A is the "creator" (gets black), B is the "joiner" (gets white).
+ *     A writes a game room to games/ and notifies B via
+ *     users/{B.uid}/quickPlayGame.
+ *  5. Player B's listener also fires with Player A's entry.
+ *     B checks users/{B.uid}/quickPlayGame — once it exists, B joins.
+ *     (A cleans up matchmaking entries.)
+ *
+ * The queue entry is also cleaned up on disconnect so stale entries
+ * don't block future searches.
+ * ─────────────────────────────────────────────────────────── */
+
+let matchmakingListener   = null;   // Firebase child_added listener on matchmaking/
+let quickPlayGameListener = null;   // Firebase listener waiting for game notification
+const QP_TIME_SECS        = 600;    // 10-minute rapid
+
+function findMatch() {
   if (!currentUser) { openAuthModal('signup'); return; }
   if (currentUser.isAnonymous) {
     alert('Guest accounts cannot use matchmaking. Sign up for a free account!');
     openAuthModal('signup');
     return;
   }
-  const statusEl = document.getElementById('matchmakingStatus');
-  const textEl   = document.getElementById('matchmakingText');
-  statusEl.style.display = 'flex';
-  textEl.textContent = `Searching for a ${category} (${timeControl}) opponent…`;
-  // TODO: push player into Firebase matchmaking queue, listen for a pairing.
+  if (!db) return;
+
+  const uid = currentUser.uid;
+
+  // Show the searching UI, hide the button
+  document.getElementById('qpIdle').style.display          = 'none';
+  document.getElementById('matchmakingStatus').style.display = 'flex';
+  document.getElementById('matchmakingText').textContent   = 'Searching for an opponent…';
+
+  // Write ourselves into the matchmaking queue
+  const myRef = db.ref(`matchmaking/${uid}`);
+  myRef.set({
+    username: currentUsername,
+    joinedAt: firebase.database.ServerValue.TIMESTAMP
+  });
+
+  // Remove our entry automatically if we disconnect
+  myRef.onDisconnect().remove();
+
+  // ── Listen for other players in the queue ──
+  // child_added fires once for every existing entry AND new ones.
+  // We skip our own entry.
+  matchmakingListener = db.ref('matchmaking')
+    .orderByChild('joinedAt')
+    .on('child_added', async snap => {
+      if (!snap.exists()) return;
+      const opponentUid = snap.key;
+      if (opponentUid === uid) return;           // skip ourselves
+
+      // Someone else is in the queue — we (the one who received the event
+      // first) become the game creator (black); they become joiner (white).
+      // Use a Firebase transaction on the opponent's entry to claim them
+      // atomically, so two players don't both try to pair with the same person.
+      const claimRef = db.ref(`matchmaking/${opponentUid}`);
+      try {
+        const result = await claimRef.transaction(current => {
+          if (current === null) return; // already claimed — abort
+          return null;                  // claim it by removing
+        });
+
+        if (!result.committed) return;  // another player got there first
+
+        const opponentUsername = result.snapshot.val()?.username || 'Opponent';
+
+        // Also remove ourselves from the queue
+        await myRef.remove();
+        stopMatchmakingListener();
+
+        // Create the game room
+        const code = generateJoinCode();
+        myColor        = 'b';          // creator = black
+        isFlipped      = true;
+        gameMode       = 'friend';
+        friendJoinCode = code;
+        playerId       = uid;
+        hostUsername   = currentUsername;
+        joinerUsername = opponentUsername;
+
+        const gameData = {
+          players:     { host: uid },
+          usernames:   { host: currentUsername, joiner: opponentUsername },
+          colors:      { [uid]: 'b' },
+          hostColor:   'b',
+          timeControl: QP_TIME_SECS,
+          board:       boardToFirebase(INITIAL_BOARD),
+          currentTurn: 'w',
+          moveHistory: [],
+          gameOver:    false,
+          quickPlay:   true,
+          createdAt:   firebase.database.ServerValue.TIMESTAMP
+        };
+
+        await db.ref(`games/${code}`).set(gameData);
+
+        // Notify the opponent of the game code
+        await db.ref(`users/${opponentUid}/quickPlayGame`).set({
+          joinCode:        code,
+          hostUsername:    currentUsername,
+          hostUid:         uid
+        });
+        // Auto-clean that notification after 30 s
+        setTimeout(() => db.ref(`users/${opponentUid}/quickPlayGame`).remove(), 30000);
+
+        // Update matchmaking text while game starts
+        document.getElementById('matchmakingText').textContent = `Found ${opponentUsername}! Loading…`;
+
+        // Start the game listener (closeOnStart=false → wait for joiner write)
+        setupGameListener(code, false);
+
+      } catch (err) {
+        console.error('Matchmaking transaction error:', err);
+      }
+    });
+
+  // ── Also watch for someone pairing US (i.e. we are the joiner) ──
+  quickPlayGameListener = db.ref(`users/${uid}/quickPlayGame`)
+    .on('value', async snap => {
+      if (!snap.exists()) return;
+      const data = snap.val();
+      if (!data || !data.joinCode) return;
+
+      // Remove the notification immediately
+      db.ref(`users/${uid}/quickPlayGame`).remove();
+
+      // Stop our own queue listener — the other player already claimed us
+      await myRef.remove();
+      stopMatchmakingListener();
+
+      // Join as white
+      const code = data.joinCode;
+      myColor        = 'w';
+      isFlipped      = false;
+      gameMode       = 'friend';
+      friendJoinCode = code;
+      playerId       = uid;
+      joinerUsername = currentUsername;
+      hostUsername   = data.hostUsername || 'Opponent';
+
+      document.getElementById('matchmakingText').textContent = `Found ${hostUsername}! Loading…`;
+
+      const updates = {};
+      updates[`games/${code}/players/joiner`]     = uid;
+      updates[`games/${code}/usernames/joiner`]   = currentUsername;
+      updates[`games/${code}/colors/${uid}`]      = 'w';
+
+      await db.ref().update(updates);
+
+      closeModal('friendModal');
+      setupGameListener(code, true);
+    });
+}
+
+function stopMatchmakingListener() {
+  if (matchmakingListener) {
+    db.ref('matchmaking').off('child_added', matchmakingListener);
+    matchmakingListener = null;
+  }
+  if (quickPlayGameListener && currentUser) {
+    db.ref(`users/${currentUser.uid}/quickPlayGame`).off('value', quickPlayGameListener);
+    quickPlayGameListener = null;
+  }
 }
 
 function cancelMatchmaking() {
+  if (!db || !currentUser) return;
+  stopMatchmakingListener();
+  db.ref(`matchmaking/${currentUser.uid}`).remove();
+  // Reset UI
   document.getElementById('matchmakingStatus').style.display = 'none';
-  // TODO: remove player from Firebase matchmaking queue.
+  document.getElementById('qpIdle').style.display            = 'block';
 }
 
 /** Leaderboards — stub modal */
@@ -2602,10 +2768,19 @@ function setupGameListener(code, closeOnStart) {
       // Black (host):   isFlipped = true  → black at bottom
       isFlipped = (localMyColor === 'b');
 
+      // Apply time control from game data (quick play sets this to 600)
+      if (gameData.timeControl != null) {
+        timerLimitSecs  = gameData.timeControl;
+        timerWhiteSecs  = gameData.timeControl;
+        timerBlackSecs  = gameData.timeControl;
+      }
+
       gameMode = 'friend';
       initGame();      // resets board state and renders
       updateGameInfo();
       showInGameChat();
+      // Auto-start timers for timed games
+      if (timerLimitSecs > 0) startTimers();
       return;
     }
 

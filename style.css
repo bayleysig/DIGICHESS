@@ -1532,36 +1532,34 @@ body {
   margin: 20px 0;
 }
 
-/* ── Quick Play grid ── */
-.qp-grid {
-  display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 8px;
-}
-
-.qp-btn {
+/* ── Quick Play — single button ── */
+.qp-solo-btn {
   display: flex;
-  flex-direction: column;
   align-items: center;
-  gap: 4px;
-  padding: 12px 6px;
+  gap: 14px;
+  width: 100%;
+  padding: 16px 20px;
   background: var(--bg-panel);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   cursor: pointer;
   transition: all 0.15s;
   color: var(--text-primary);
+  text-align: left;
 }
-.qp-btn:hover {
+.qp-solo-btn:hover {
   background: var(--green-subtle);
   border-color: var(--green);
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px var(--green-glow);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 16px var(--green-glow);
 }
+.qp-solo-icon { font-size: 1.8rem; line-height: 1; flex-shrink: 0; }
+.qp-solo-label { font-size: 1rem; font-weight: 700; color: var(--text-primary); }
+.qp-solo-sub   { font-size: 0.78rem; color: var(--text-muted); margin-top: 1px; }
 
-.qp-icon { font-size: 1.3rem; line-height: 1; }
-.qp-name { font-size: 0.72rem; font-weight: 600; color: var(--text-secondary); }
-.qp-time { font-size: 0.78rem; font-weight: 700; color: var(--text-primary); font-family: monospace; }
+/* Remove the old qp-grid styles (kept for reference, no-op now) */
+.qp-grid { display: none; }
+.qp-btn  { display: none; }
 
 /* Matchmaking spinner */
 .matchmaking-status {

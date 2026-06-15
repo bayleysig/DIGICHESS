@@ -304,34 +304,16 @@
           <svg viewBox="0 0 20 20" fill="currentColor" width="13" height="13"><path fill-rule="evenodd" d="M11.3 1.046A1 1 0 0112 2v5h4a1 1 0 01.82 1.573l-7 10A1 1 0 018 18v-5H4a1 1 0 01-.82-1.573l7-10a1 1 0 011.12-.38z" clip-rule="evenodd"/></svg>
           Quick Play
         </div>
-        <p class="online-section-sub">Jump straight into a match — we'll find you an opponent.</p>
-        <div class="qp-grid">
-          <button class="qp-btn" onclick="findMatch('bullet','1+0')">
-            <span class="qp-icon">⚡</span>
-            <span class="qp-name">Bullet</span>
-            <span class="qp-time">1 + 0</span>
-          </button>
-          <button class="qp-btn" onclick="findMatch('blitz','3+0')">
-            <span class="qp-icon">🔥</span>
-            <span class="qp-name">Blitz</span>
-            <span class="qp-time">3 + 0</span>
-          </button>
-          <button class="qp-btn" onclick="findMatch('blitz','5+0')">
-            <span class="qp-icon">🔥</span>
-            <span class="qp-name">Blitz</span>
-            <span class="qp-time">5 + 0</span>
-          </button>
-          <button class="qp-btn" onclick="findMatch('rapid','10+0')">
-            <span class="qp-icon">⏱</span>
-            <span class="qp-name">Rapid</span>
-            <span class="qp-time">10 + 0</span>
-          </button>
-          <button class="qp-btn" onclick="findMatch('rapid','15+10')">
-            <span class="qp-icon">⏱</span>
-            <span class="qp-name">Rapid</span>
-            <span class="qp-time">15 + 10</span>
+        <p class="online-section-sub">10-minute game — press the button and we'll pair you instantly.</p>
+
+        <div id="qpIdle">
+          <button class="qp-solo-btn" onclick="findMatch()">
+            <span class="qp-solo-icon">⚡</span>
+            <span class="qp-solo-label">Find Match</span>
+            <span class="qp-solo-sub">10 min · Rapid</span>
           </button>
         </div>
+
         <div id="matchmakingStatus" style="display:none;" class="matchmaking-status">
           <span class="matchmaking-spinner"></span>
           <span id="matchmakingText">Searching for an opponent…</span>
