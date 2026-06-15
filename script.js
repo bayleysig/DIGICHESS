@@ -1644,7 +1644,7 @@ async function loadFriendsModal() {
             </button>
             <div class="friend-more-menu" id="friendMenu_${fuid}" style="display:none;">
               <button class="friend-more-item" onclick="sendMatchRequest('${fuid}','${fname}')">
-                ♟ New Match
+                ♟ Challenge
               </button>
             </div>
           </div>
@@ -1810,7 +1810,7 @@ async function sendMatchRequest(toUid, toUsername) {
   if (list) {
     const flash = document.createElement('p');
     flash.style.cssText = 'font-size:0.78rem;color:var(--green-bright);margin-top:6px;';
-    flash.textContent = `Match request sent to ${toUsername}!`;
+    flash.textContent = `Challenge sent to ${toUsername}!`;
     list.parentNode.insertBefore(flash, list.nextSibling);
     setTimeout(() => flash.remove(), 3000);
   }
@@ -1912,7 +1912,7 @@ function showMatchRequestNotification(reqKey, fromUsername, fromUid) {
   const id = pushNotif({
     type:        'match',
     icon:        '♟',
-    title:       `<strong>${fromUsername}</strong> would like to play a match`,
+    title:       `<strong>${fromUsername}</strong> has challenged you to a game`,
     actions: [
       { label: 'Accept',  cls: 'btn-primary', onclick: `acceptMatchRequest('${reqKey}','${fromUid}','${fromUsername}')` },
       { label: 'Decline', cls: 'btn-ghost',   onclick: `declineMatchRequest('${reqKey}')` }
