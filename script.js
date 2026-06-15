@@ -46,6 +46,7 @@ function initFirebase() {
           startMatchRequestListener();
           startMatchAcceptedListener();
           startDmNotifListener();
+          startFriendRequestNotifListener();
         });
       } else {
         stopMatchRequestListener();
@@ -1858,38 +1859,92 @@ function stopMatchRequestListener() {
   }
 }
 
-function showMatchRequestNotification(reqKey, fromUsername, fromUid) {
-  const container = document.getElementById('matchNotifContainer');
+/* ══════════════════════════════════════════
+   UNIFIED NOTIFICATION SYSTEM
+   All notifications funnel through pushNotif()
+══════════════════════════════════════════ */
+
+const NOTIF_AUTO_DISMISS_MS = 6000;   // plain notifications auto-dismiss
+const NOTIF_ACTION_DISMISS_MS = 0;    // action notifications (match/friend req) stay until actioned
+
+let notifCounter = 0;
+
+/**
+ * pushNotif({ type, icon, title, body, actions, autoDismiss })
+ *  type        : 'message' | 'friend' | 'match' | 'info'
+ *  icon        : emoji string
+ *  title       : bold heading text
+ *  body        : sub-text (optional)
+ *  actions     : array of { label, cls, onclick } (optional)
+ *  autoDismiss : ms until auto-close, 0 = never (default: 6000)
+ */
+function pushNotif({ type = 'info', icon = '♟', title = '', body = '', actions = [], autoDismiss = NOTIF_AUTO_DISMISS_MS }) {
+  const container = document.getElementById('notifContainer');
   if (!container) return;
 
-  // Don't show duplicate toasts for the same request
-  if (document.getElementById(`matchNotif_${reqKey}`)) return;
+  const id   = `notif_${++notifCounter}`;
+  const wrap = document.createElement('div');
+  wrap.className = `notif notif-${type}`;
+  wrap.id        = id;
 
-  const toast = document.createElement('div');
-  toast.className = 'match-notif';
-  toast.id = `matchNotif_${reqKey}`;
-  toast.innerHTML = `
-    <div class="match-notif-icon">♟</div>
-    <div class="match-notif-body">
-      <p class="match-notif-title"><strong>${fromUsername}</strong> would like to play a match</p>
-      <div class="match-notif-actions">
-        <button class="btn btn-sm btn-primary" onclick="acceptMatchRequest('${reqKey}','${fromUid}','${fromUsername}')">Accept</button>
-        <button class="btn btn-sm btn-ghost"   onclick="declineMatchRequest('${reqKey}')">Decline</button>
-      </div>
+  const actionsHtml = actions.map(a =>
+    `<button class="btn btn-sm ${a.cls || 'btn-ghost'}" onclick="${a.onclick}; dismissNotif('${id}')">${a.label}</button>`
+  ).join('');
+
+  wrap.innerHTML = `
+    <div class="notif-icon">${icon}</div>
+    <div class="notif-body">
+      <p class="notif-title">${title}</p>
+      ${body ? `<p class="notif-sub">${body}</p>` : ''}
+      ${actionsHtml ? `<div class="notif-actions">${actionsHtml}</div>` : ''}
     </div>
-    <button class="match-notif-close" onclick="dismissMatchNotif('${reqKey}')" title="Dismiss">✕</button>
+    <button class="notif-close" onclick="dismissNotif('${id}')" title="Dismiss">✕</button>
   `;
-  container.appendChild(toast);
+
+  // Insert at top (newest first)
+  container.insertBefore(wrap, container.firstChild);
 
   // Animate in
-  requestAnimationFrame(() => toast.classList.add('match-notif-show'));
+  requestAnimationFrame(() => wrap.classList.add('notif-show'));
+
+  // Auto-dismiss
+  if (autoDismiss > 0) {
+    setTimeout(() => dismissNotif(id), autoDismiss);
+  }
+
+  return id;
 }
 
+function dismissNotif(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.classList.remove('notif-show');
+  setTimeout(() => el.remove(), 300);
+}
+
+// ── Replace old showMatchRequestNotification ──
+function showMatchRequestNotification(reqKey, fromUsername, fromUid) {
+  // Avoid duplicates
+  if (document.getElementById(`notif_mr_${reqKey}`)) return;
+
+  const id = pushNotif({
+    type:        'match',
+    icon:        '♟',
+    title:       `<strong>${fromUsername}</strong> would like to play a match`,
+    actions: [
+      { label: 'Accept',  cls: 'btn-primary', onclick: `acceptMatchRequest('${reqKey}','${fromUid}','${fromUsername}')` },
+      { label: 'Decline', cls: 'btn-ghost',   onclick: `declineMatchRequest('${reqKey}')` }
+    ],
+    autoDismiss: 0   // stays until actioned
+  });
+
+  // Tag it so we can dedupe
+  if (id) document.getElementById(id).id = `notif_mr_${reqKey}`;
+}
+
+// Keep old dismissMatchNotif name working (used by accept/decline callbacks)
 function dismissMatchNotif(reqKey) {
-  const toast = document.getElementById(`matchNotif_${reqKey}`);
-  if (!toast) return;
-  toast.classList.remove('match-notif-show');
-  setTimeout(() => toast.remove(), 300);
+  dismissNotif(`notif_mr_${reqKey}`);
 }
 
 async function acceptMatchRequest(reqKey, fromUid, fromUsername) {
@@ -2212,14 +2267,45 @@ function startDmNotifListener() {
         .on('child_added', snap => {
           const msg = snap.val();
           if (!msg || msg.uid === uid) return;
-          // Only count if messages modal is closed or we're not in this thread
           const modalOpen = document.getElementById('messagesModal').style.display !== 'none';
           const inThread  = activeDmUid === fuid;
           if (!modalOpen || !inThread) {
             dmUnreadCounts[fuid] = (dmUnreadCounts[fuid] || 0) + 1;
             updateUnreadBadge();
+            pushNotif({
+              type:        'message',
+              icon:        '💬',
+              title:       `New message from <strong>${msg.username}</strong>`,
+              body:        msg.text.substring(0, 60) + (msg.text.length > 60 ? '…' : ''),
+              actions:     [{ label: 'Open', cls: 'btn-primary', onclick: `openMessagesModal(); openDmChat('${fuid}','${msg.username}')` }],
+              autoDismiss: NOTIF_AUTO_DISMISS_MS
+            });
           }
         });
+    });
+  });
+}
+
+// Also notify on incoming friend requests
+function startFriendRequestNotifListener() {
+  if (!currentUser || !db) return;
+  const uid = currentUser.uid;
+
+  db.ref(`users/${uid}/friendRequests`).on('child_added', snap => {
+    if (!snap.exists()) return;
+    db.ref(`users/${snap.key}/username`).once('value').then(nameSnap => {
+      const fromUsername = nameSnap.val() || 'Someone';
+      const fromUid      = snap.key;
+      pushNotif({
+        type:        'friend',
+        icon:        '👤',
+        title:       `<strong>${fromUsername}</strong> sent you a friend request`,
+        actions: [
+          { label: 'Accept',  cls: 'btn-primary', onclick: `acceptFriendRequest('${fromUid}','${fromUsername}')` },
+          { label: 'Decline', cls: 'btn-ghost',   onclick: `declineFriendRequest('${fromUid}')` }
+        ],
+        autoDismiss: 0
+      });
     });
   });
 }
