@@ -27,6 +27,23 @@ function initFirebase() {
       firebase.initializeApp(firebaseConfig);
       db = firebase.database();
     }
+
+    // Set up auth state listener — fires immediately with current session
+    firebase.auth().onAuthStateChanged(user => {
+      currentUser = user;
+      if (user) {
+        // Logged in — fetch username from DB and update UI
+        db.ref(`users/${user.uid}/username`).once('value').then(snap => {
+          const username = snap.val() || 'Player';
+          currentUsername = username;
+          updateAccountUI(username);
+        });
+      } else {
+        currentUsername = null;
+        updateAccountUI(null);
+      }
+    });
+
   } catch (err) {
     console.error('Firebase initialization error:', err);
   }
@@ -85,6 +102,10 @@ let friendGameRef   = null;        // reference to current game in Firebase
 let gameListener    = null;        // listener reference for unsubscribe
 let myColor         = null;        // 'w' or 'b' when playing with friend
 
+// Auth state
+let currentUser     = null;        // Firebase Auth user object
+let currentUsername = null;        // display username
+
 /* ══════════════════════════════════════════
    MULTIPLAYER HELPER FUNCTIONS (defined early)
 ══════════════════════════════════════════ */
@@ -98,6 +119,11 @@ function generateJoinCode() {
 }
 
 function openFriendModal() {
+  // Require login to play vs friend
+  if (!currentUser) {
+    openAuthModal('signup');
+    return;
+  }
   document.getElementById('friendModal').style.display = 'flex';
   document.getElementById('joinError').style.display = 'none';
   document.getElementById('joinCodeDisplay').style.display = 'none';
@@ -1083,7 +1109,17 @@ document.addEventListener('keydown', e => {
   if (e.key === 'f') flipBoard();
   if (e.key === 'Escape') {
     closeModal('promotionModal');
+    closeModal('authModal');
     selectedSq = null; legalMoves = []; renderBoard();
+  }
+  // Enter submits auth forms
+  if (e.key === 'Enter') {
+    const authModal = document.getElementById('authModal');
+    if (authModal && authModal.style.display !== 'none') {
+      const signUpVisible = document.getElementById('authSignUp').style.display !== 'none';
+      if (signUpVisible) handleSignUp();
+      else handleSignIn();
+    }
   }
 });
 
@@ -1095,6 +1131,157 @@ document.addEventListener('keydown', e => {
     if (e.target === this) closeModal(id);
   });
 });
+
+/* ══════════════════════════════════════════
+   AUTHENTICATION
+══════════════════════════════════════════ */
+
+function openAuthModal(defaultTab) {
+  switchAuthTab(defaultTab || 'signup');
+  // Reset button states
+  const signUpBtn = document.getElementById('signUpBtn');
+  const signInBtn = document.getElementById('signInBtn');
+  if (signUpBtn) { signUpBtn.disabled = false; signUpBtn.textContent = 'Sign Up'; }
+  if (signInBtn) { signInBtn.disabled = false; signInBtn.textContent = 'Sign In'; }
+  document.getElementById('authModal').style.display = 'flex';
+}
+
+function switchAuthTab(tab) {
+  const isSignUp = tab === 'signup';
+  document.getElementById('authSignUp').style.display = isSignUp ? 'block' : 'none';
+  document.getElementById('authSignIn').style.display = isSignUp ? 'none' : 'block';
+  document.getElementById('tabSignUp').classList.toggle('active', isSignUp);
+  document.getElementById('tabSignIn').classList.toggle('active', !isSignUp);
+  // Clear errors and inputs on tab switch
+  document.getElementById('signUpError').style.display = 'none';
+  document.getElementById('signInError').style.display = 'none';
+}
+
+function updateAccountUI(username) {
+  const widget   = document.getElementById('accountWidget');
+  const avatar   = document.getElementById('accountAvatar');
+  const nameEl   = document.getElementById('accountUsername');
+  const signInBtn = document.getElementById('btnSignIn');
+
+  if (username) {
+    avatar.textContent  = username.charAt(0).toUpperCase();
+    nameEl.textContent  = username;
+    widget.style.display   = 'flex';
+    signInBtn.style.display = 'none';
+  } else {
+    widget.style.display   = 'none';
+    signInBtn.style.display = 'inline-flex';
+  }
+}
+
+async function handleSignUp() {
+  const username = document.getElementById('signUpUsername').value.trim().toLowerCase();
+  const password = document.getElementById('signUpPassword').value;
+  const errorEl  = document.getElementById('signUpError');
+  const btn      = document.getElementById('signUpBtn');
+
+  errorEl.style.display = 'none';
+
+  // Validate username
+  if (username.length < 3) {
+    showAuthError(errorEl, 'Username must be at least 3 characters.');
+    return;
+  }
+  if (!/^[a-z0-9_]+$/.test(username)) {
+    showAuthError(errorEl, 'Username can only contain letters, numbers, and underscores.');
+    return;
+  }
+  if (password.length < 6) {
+    showAuthError(errorEl, 'Password must be at least 6 characters.');
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Creating account…';
+
+  try {
+    // Check username is not taken
+    const snap = await db.ref(`usernames/${username}`).once('value');
+    if (snap.exists()) {
+      showAuthError(errorEl, 'That username is already taken. Try another.');
+      btn.disabled = false;
+      btn.textContent = 'Sign Up';
+      return;
+    }
+
+    // Create Firebase Auth account using username@digichess.com as internal email
+    const email = `${username}@digichess.com`;
+    const cred  = await firebase.auth().createUserWithEmailAndPassword(email, password);
+    const uid   = cred.user.uid;
+
+    // Store username in DB (both for lookup and reverse lookup)
+    await db.ref(`users/${uid}/username`).set(username);
+    await db.ref(`usernames/${username}`).set(uid);
+
+    // Close modal — onAuthStateChanged will update the UI
+    closeModal('authModal');
+
+  } catch (err) {
+    console.error('Sign up error:', err);
+    showAuthError(errorEl, friendlyAuthError(err.code));
+    btn.disabled = false;
+    btn.textContent = 'Sign Up';
+  }
+}
+
+async function handleSignIn() {
+  const username = document.getElementById('signInUsername').value.trim().toLowerCase();
+  const password = document.getElementById('signInPassword').value;
+  const errorEl  = document.getElementById('signInError');
+  const btn      = document.getElementById('signInBtn');
+
+  errorEl.style.display = 'none';
+
+  if (!username || !password) {
+    showAuthError(errorEl, 'Please enter your username and password.');
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Signing in…';
+
+  try {
+    const email = `${username}@digichess.com`;
+    await firebase.auth().signInWithEmailAndPassword(email, password);
+    closeModal('authModal');
+  } catch (err) {
+    console.error('Sign in error:', err);
+    showAuthError(errorEl, friendlyAuthError(err.code));
+    btn.disabled = false;
+    btn.textContent = 'Sign In';
+  }
+}
+
+function signOutUser() {
+  firebase.auth().signOut().catch(err => console.error('Sign out error:', err));
+}
+
+function showAuthError(el, message) {
+  el.textContent     = message;
+  el.style.display   = 'block';
+}
+
+function friendlyAuthError(code) {
+  switch (code) {
+    case 'auth/wrong-password':
+    case 'auth/user-not-found':
+    case 'auth/invalid-credential':
+      return 'Incorrect username or password.';
+    case 'auth/too-many-requests':
+      return 'Too many attempts. Please wait a moment and try again.';
+    case 'auth/weak-password':
+      return 'Password must be at least 6 characters.';
+    case 'auth/email-already-in-use':
+      return 'That username is already taken. Try another.';
+    default:
+      return 'Something went wrong. Please try again.';
+  }
+}
 
 /* ══════════════════════════════════════════
    ADDITIONAL MULTIPLAYER FUNCTIONS

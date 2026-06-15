@@ -10,6 +10,7 @@
   <!-- Firebase SDK (Compat version for <script> tags) -->
   <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-app-compat.js"></script>
   <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-database-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.22.1/firebase-auth-compat.js"></script>
 </head>
 <body>
 
@@ -41,6 +42,17 @@
         Play vs AI
       </button>
     </nav>
+
+    <!-- Account indicator (shown when logged in) -->
+    <div class="account-widget" id="accountWidget" style="display:none;">
+      <span class="account-avatar" id="accountAvatar"></span>
+      <span class="account-username" id="accountUsername"></span>
+      <button class="btn btn-sm btn-ghost" onclick="signOutUser()">Sign Out</button>
+    </div>
+    <!-- Sign in button (shown when logged out) -->
+    <button class="btn btn-sm btn-primary" id="btnSignIn" onclick="openAuthModal()" style="display:none;">
+      Sign In
+    </button>
   </header>
 
   <!-- AI COMING SOON BANNER -->
@@ -246,6 +258,51 @@
 
       <div class="modal-actions" style="margin-top: 16px;">
         <button class="btn btn-ghost" onclick="closeModal('friendModal')">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════
+       AUTH MODAL (Sign Up / Sign In)
+  ══════════════════════════════════════ -->
+  <div class="modal-overlay" id="authModal" style="display:none;">
+    <div class="modal auth-modal">
+      <!-- Tabs -->
+      <div class="auth-tabs">
+        <button class="auth-tab active" id="tabSignUp" onclick="switchAuthTab('signup')">Sign Up</button>
+        <button class="auth-tab" id="tabSignIn" onclick="switchAuthTab('signin')">Sign In</button>
+      </div>
+
+      <!-- Sign Up Panel -->
+      <div id="authSignUp">
+        <h2 class="modal-title" style="margin-bottom:4px;">Create Account</h2>
+        <p class="modal-sub" style="margin-bottom:20px;">Choose a username and password to get started</p>
+        <div class="auth-field">
+          <label class="auth-label">Username</label>
+          <input type="text" id="signUpUsername" class="auth-input" placeholder="e.g. chesswizard99" maxlength="20" autocomplete="off" />
+        </div>
+        <div class="auth-field">
+          <label class="auth-label">Password</label>
+          <input type="password" id="signUpPassword" class="auth-input" placeholder="At least 6 characters" autocomplete="new-password" />
+        </div>
+        <div id="signUpError" class="auth-error" style="display:none;"></div>
+        <button class="btn btn-primary auth-submit" id="signUpBtn" onclick="handleSignUp()">Sign Up</button>
+      </div>
+
+      <!-- Sign In Panel -->
+      <div id="authSignIn" style="display:none;">
+        <h2 class="modal-title" style="margin-bottom:4px;">Welcome Back</h2>
+        <p class="modal-sub" style="margin-bottom:20px;">Sign in to play against friends online</p>
+        <div class="auth-field">
+          <label class="auth-label">Username</label>
+          <input type="text" id="signInUsername" class="auth-input" placeholder="Your username" maxlength="20" autocomplete="off" />
+        </div>
+        <div class="auth-field">
+          <label class="auth-label">Password</label>
+          <input type="password" id="signInPassword" class="auth-input" placeholder="Your password" autocomplete="current-password" />
+        </div>
+        <div id="signInError" class="auth-error" style="display:none;"></div>
+        <button class="btn btn-primary auth-submit" id="signInBtn" onclick="handleSignIn()">Sign In</button>
       </div>
     </div>
   </div>
