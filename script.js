@@ -1204,18 +1204,12 @@ function setupGameListener(code) {
     moveHistory = gameData.moveHistory || [];
     gameOver = gameData.gameOver;
     
-    // Check if second player joined
-    if (Object.keys(gameData.players).length === 2 && !friendJoinCode) {
-      friendJoinCode = code;
-    }
-    
     renderBoard();
     renderMoveHistory();
     updateStatusBar();
     updateGameInfo();
   });
   
-  initGame();
   closeModal('friendModal');
 }
 
