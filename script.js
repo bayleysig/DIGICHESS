@@ -149,7 +149,6 @@ function openFriendModal() {
   document.getElementById('joinError').style.display = 'none';
   document.getElementById('joinCodeDisplay').style.display = 'none';
   document.getElementById('friendJoinCode').value = '';
-  document.getElementById('waitingMsg') && (document.getElementById('waitingMsg').style.display = 'none');
 }
 
 /* ══════════════════════════════════════════
@@ -1982,8 +1981,6 @@ function showMatchAcceptedWaiting(fromUsername, code) {
   document.getElementById('friendModal').style.display = 'flex';
   document.getElementById('joinCodeDisplay').style.display = 'block';
   document.getElementById('joinCodeBox').textContent = code;
-  document.getElementById('waitingMsg').style.display = 'block';
-  document.getElementById('waitingMsg').textContent = `⏳ Waiting for ${fromUsername} to join…`;
 }
 
 async function declineMatchRequest(reqKey) {
@@ -2348,8 +2345,7 @@ function createFriendGame() {
     document.getElementById('joinCodeBox').textContent = friendJoinCode;
     document.getElementById('joinCodeDisplay').style.display = 'block';
     const wMsg = document.getElementById('waitingMsg');
-    if (wMsg) wMsg.style.display = 'block';
-    setupGameListener(friendJoinCode, false);
+    if (wMsg) wMsg.style.display = 'block';    setupGameListener(friendJoinCode, false);
   }).catch(err => {
     alert('Error creating game: ' + err.message);
   });
