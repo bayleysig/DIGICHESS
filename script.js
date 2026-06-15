@@ -1207,43 +1207,48 @@ function setupGameListener(code, closeOnStart) {
     friendGameRef.off('value', gameListener);
   }
   
-  let firstUpdate = true;
+  let gameStarted = false;
   
   gameListener = friendGameRef.on('value', snapshot => {
     if (!snapshot.exists()) return;
     
     const gameData = snapshot.val();
-    
-    // Parse board, converting "." placeholders back to null
-    const parsedBoard = boardFromFirebase(gameData.board);
-
-    // If this is the host's first update (game just created), only close
-    // the modal once a second player joins so the host can share the code.
     const playerCount = gameData.players ? Object.keys(gameData.players).length : 1;
 
-    if (firstUpdate) {
-      firstUpdate = false;
-      if (closeOnStart || playerCount >= 2) {
-        closeModal('friendModal');
-        board = parsedBoard;
-        currentTurn = gameData.currentTurn;
-        moveHistory = Array.isArray(gameData.moveHistory) ? gameData.moveHistory : Object.values(gameData.moveHistory || {});
-        gameOver = gameData.gameOver;
-        renderBoard();
-        renderMoveHistory();
-        updateStatusBar();
-        updateGameInfo();
-      }
-      // If host and waiting for friend, leave modal open — do nothing yet
+    // ── Game hasn't started yet (waiting for second player) ──
+    if (!gameStarted) {
+      // Host stays in modal until friend joins
+      if (!closeOnStart && playerCount < 2) return;
+
+      // Both players present — start the game
+      gameStarted = true;
+      closeModal('friendModal');
+
+      // Always start from a clean local board — don't trust Firebase board data
+      // for the initial render (avoids null/encoding issues)
+      gameMode = 'friend';
+      initGame();
+      updateGameInfo();
       return;
     }
 
-    // Subsequent updates: always apply and close modal if still open
-    closeModal('friendModal');
+    // ── Game in progress — apply move synced from Firebase ──
+    // Only apply if it's the other player's update (not our own sync echoing back)
+    const parsedBoard = boardFromFirebase(gameData.board);
+
+    // Validate: must be 8 rows of 8 columns
+    if (!parsedBoard || parsedBoard.length !== 8 || parsedBoard.some(r => !r || r.length !== 8)) {
+      console.error('Invalid board from Firebase:', parsedBoard);
+      return;
+    }
+
     board = parsedBoard;
     currentTurn = gameData.currentTurn;
-    moveHistory = Array.isArray(gameData.moveHistory) ? gameData.moveHistory : Object.values(gameData.moveHistory || {});
+    moveHistory = Array.isArray(gameData.moveHistory)
+      ? gameData.moveHistory
+      : Object.values(gameData.moveHistory || {});
     gameOver = gameData.gameOver;
+
     renderBoard();
     renderMoveHistory();
     updateStatusBar();
@@ -1254,6 +1259,11 @@ function setupGameListener(code, closeOnStart) {
 function syncMoveToFriend(notation) {
   if (!db || !friendGameRef || gameMode !== 'friend') return;
   
+  // Only sync after our own move (the turn just switched away from us)
+  // myColor is the color we play — after our move, currentTurn flips to the other player
+  const weJustMoved = (myColor === 'w' && currentTurn === 'b') || (myColor === 'b' && currentTurn === 'w');
+  if (!weJustMoved) return;
+
   try {
     const updates = {
       board: boardToFirebase(board),
