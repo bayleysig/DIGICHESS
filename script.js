@@ -34,9 +34,15 @@ function initFirebase() {
       if (user) {
         // Logged in — fetch username from DB and update UI
         db.ref(`users/${user.uid}/username`).once('value').then(snap => {
-          const username = snap.val() || 'Player';
-          currentUsername = username;
-          updateAccountUI(username);
+          const username = snap.val();
+          // Google users with no username yet — prompt them to choose
+          if (!username && !user.isAnonymous) {
+            openChooseUsernameModal(user.uid);
+            return;
+          }
+          const displayName = username || 'Player';
+          currentUsername = displayName;
+          updateAccountUI(displayName);
           startMatchRequestListener();
           startMatchAcceptedListener();
         });
@@ -1160,6 +1166,10 @@ document.addEventListener('keydown', e => {
       if (signUpVisible) handleSignUp();
       else handleSignIn();
     }
+    const chooseModal = document.getElementById('chooseUsernameModal');
+    if (chooseModal && chooseModal.style.display !== 'none') {
+      submitChosenUsername();
+    }
   }
 });
 
@@ -1317,33 +1327,65 @@ async function signInWithGoogle() {
     // Check if this Google user already has a username stored
     const snap = await db.ref(`users/${uid}/username`).once('value');
     if (!snap.exists()) {
-      // First time — derive a username from their Google display name
-      let base = (user.displayName || 'player')
-        .toLowerCase()
-        .replace(/[^a-z0-9_]/g, '_')
-        .substring(0, 18);
-
-      // Ensure uniqueness by appending digits if taken
-      let username = base;
-      let attempt  = 0;
-      while (true) {
-        const taken = await db.ref(`usernames/${username}`).once('value');
-        if (!taken.exists()) break;
-        attempt++;
-        username = base.substring(0, 15) + '_' + attempt;
-      }
-
-      await db.ref(`users/${uid}/username`).set(username);
-      await db.ref(`usernames/${username}`).set(uid);
+      // No username yet — close auth modal and prompt them to choose one
+      closeModal('authModal');
+      openChooseUsernameModal(uid);
+    } else {
+      closeModal('authModal');
     }
-
-    closeModal('authModal');
   } catch (err) {
-    // user closed the popup — not a real error worth alerting about
     if (err.code !== 'auth/popup-closed-by-user' && err.code !== 'auth/cancelled-popup-request') {
       console.error('Google sign-in error:', err);
       alert('Google sign-in failed. Please try again.');
     }
+  }
+}
+
+function openChooseUsernameModal(uid) {
+  document.getElementById('chooseUsernameModal').style.display = 'flex';
+  document.getElementById('chooseUsernameInput').value = '';
+  document.getElementById('chooseUsernameError').style.display = 'none';
+  // Store uid on the modal for use when submitting
+  document.getElementById('chooseUsernameModal').dataset.uid = uid;
+}
+
+async function submitChosenUsername() {
+  const modal    = document.getElementById('chooseUsernameModal');
+  const uid      = modal.dataset.uid || (currentUser && currentUser.uid);
+  const username = document.getElementById('chooseUsernameInput').value.trim().toLowerCase();
+  const errorEl  = document.getElementById('chooseUsernameError');
+  const btn      = document.getElementById('chooseUsernameBtn');
+
+  errorEl.style.display = 'none';
+
+  if (username.length < 3) {
+    return showAuthError(errorEl, 'Username must be at least 3 characters.');
+  }
+  if (!/^[a-z0-9_]+$/.test(username)) {
+    return showAuthError(errorEl, 'Only letters, numbers, and underscores allowed.');
+  }
+
+  btn.disabled = true;
+  btn.textContent = 'Saving…';
+
+  try {
+    const taken = await db.ref(`usernames/${username}`).once('value');
+    if (taken.exists()) {
+      showAuthError(errorEl, 'That username is already taken. Try another.');
+      btn.disabled = false; btn.textContent = 'Save Username';
+      return;
+    }
+
+    await db.ref(`users/${uid}/username`).set(username);
+    await db.ref(`usernames/${username}`).set(uid);
+
+    currentUsername = username;
+    updateAccountUI(username);
+    closeModal('chooseUsernameModal');
+  } catch (err) {
+    console.error('Choose username error:', err);
+    showAuthError(errorEl, 'Something went wrong. Please try again.');
+    btn.disabled = false; btn.textContent = 'Save Username';
   }
 }
 
@@ -1447,8 +1489,10 @@ async function handleChangeUsername() {
     updates[`usernames/${oldUsername}`]    = null;
     updates[`usernames/${newUsername}`]    = uid;
     updates[`users/${uid}/username`]       = newUsername;
-    // Update Firebase Auth email to match
-    await firebase.auth().currentUser.updateEmail(`${newUsername}@digichess.com`);
+    // Only update Firebase Auth email for email/password accounts — not Google
+    if (!currentUser.providerData.some(p => p.providerId === 'google.com')) {
+      await firebase.auth().currentUser.updateEmail(`${newUsername}@digichess.com`);
+    }
     await db.ref().update(updates);
 
     currentUsername = newUsername;
