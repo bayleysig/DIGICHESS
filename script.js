@@ -134,8 +134,8 @@ function generateJoinCode() {
   return Math.floor(1000 + Math.random() * 9000).toString();
 }
 
-function openFriendModal() {
-  // Require login to play vs friend
+function openPlayOnlineModal() {
+  // Require login to play online
   if (!currentUser) {
     openAuthModal('signup');
     return;
@@ -145,11 +145,17 @@ function openFriendModal() {
     openAuthModal('signup');
     return;
   }
-  document.getElementById('friendModal').style.display = 'flex';
+  const modal = document.getElementById('friendModal');
+  modal.style.display = 'flex';
+  // Reset state on open
   document.getElementById('joinError').style.display = 'none';
   document.getElementById('joinCodeDisplay').style.display = 'none';
   document.getElementById('friendJoinCode').value = '';
+  document.getElementById('matchmakingStatus').style.display = 'none';
 }
+
+// Keep old name working (used internally by acceptMatchRequest flow)
+function openFriendModal() { openPlayOnlineModal(); }
 
 /* ══════════════════════════════════════════
    INITIALIZATION
@@ -1090,7 +1096,7 @@ function formatTime(secs) {
 ══════════════════════════════════════════ */
 function setGameMode(mode) {
   if (mode === 'friend') {
-    openFriendModal();
+    openPlayOnlineModal();
     return;
   }
   
@@ -2410,26 +2416,94 @@ function boardFromFirebase(raw) {
   });
 }
 
+/* ══════════════════════════════════════════
+   PLAY ONLINE — COLOR CHOICE & MATCHMAKING
+══════════════════════════════════════════ */
+
+// Track the host's color preference in the Create Game form
+let createColorChoice = 'b'; // 'b' | 'w' | 'r'
+
+function setColorChoice(color) {
+  createColorChoice = color;
+  document.getElementById('colorChoiceBlack').classList.toggle('active', color === 'b');
+  document.getElementById('colorChoiceWhite').classList.toggle('active', color === 'w');
+  document.getElementById('colorChoiceRandom').classList.toggle('active', color === 'r');
+}
+
+/**
+ * Find Match — stub for future matchmaking implementation.
+ * Shows the searching UI; replace the body with real Firebase queue logic.
+ */
+function findMatch(category, timeControl) {
+  if (!currentUser) { openAuthModal('signup'); return; }
+  if (currentUser.isAnonymous) {
+    alert('Guest accounts cannot use matchmaking. Sign up for a free account!');
+    openAuthModal('signup');
+    return;
+  }
+  const statusEl = document.getElementById('matchmakingStatus');
+  const textEl   = document.getElementById('matchmakingText');
+  statusEl.style.display = 'flex';
+  textEl.textContent = `Searching for a ${category} (${timeControl}) opponent…`;
+  // TODO: push player into Firebase matchmaking queue, listen for a pairing.
+}
+
+function cancelMatchmaking() {
+  document.getElementById('matchmakingStatus').style.display = 'none';
+  // TODO: remove player from Firebase matchmaking queue.
+}
+
+/** Leaderboards — stub modal */
+function openLeaderboardsModal() {
+  closeModal('friendModal');
+  pushNotif({
+    type: 'info',
+    icon: '🏆',
+    title: 'Leaderboards coming soon',
+    body: 'Global rankings will be available in a future update.',
+    autoDismiss: 4000
+  });
+}
+
+/** Profile — reuses the existing account modal for now */
+function openProfileModal() {
+  closeModal('friendModal');
+  if (!currentUser) { openAuthModal('signup'); return; }
+  openAccountModal();
+}
+
 function createFriendGame() {
   if (!db) { alert('Firebase not initialized. Please refresh the page.'); return; }
   if (!currentUser) { openAuthModal('signup'); return; }
 
-  playerId = currentUser.uid;
+  // Resolve color: random picks w or b at equal probability
+  let resolvedColor = createColorChoice;
+  if (resolvedColor === 'r') {
+    resolvedColor = Math.random() < 0.5 ? 'b' : 'w';
+  }
+
+  // Read time control from the selector
+  const tcSelect = document.getElementById('createTimeControl');
+  const tcSecs   = tcSelect ? parseInt(tcSelect.value) : 600;
+
+  playerId       = currentUser.uid;
   friendJoinCode = generateJoinCode();
-  myColor = 'b';   // host plays black
-  isFlipped = true; // black at bottom for host
-  gameMode = 'friend';
-  hostUsername = currentUsername;
+  myColor        = resolvedColor;
+  isFlipped      = (resolvedColor === 'b'); // host's pieces at the bottom
+  gameMode       = 'friend';
+  hostUsername   = currentUsername;
 
   const gameData = {
-    players:     { host: playerId },
-    usernames:   { host: currentUsername },
-    colors:      { [playerId]: 'b' },
-    board:       boardToFirebase(INITIAL_BOARD),
-    currentTurn: 'w',
-    moveHistory: [],
-    gameOver:    false,
-    createdAt:   firebase.database.ServerValue.TIMESTAMP
+    players:        { host: playerId },
+    usernames:      { host: currentUsername },
+    colors:         { [playerId]: resolvedColor },
+    hostColor:      resolvedColor,               // so joiner knows they get the opposite
+    timeControl:    tcSecs,
+    board:          boardToFirebase(INITIAL_BOARD),
+    currentTurn:    'w',
+    moveHistory:    [],
+    gameOver:       false,
+    createdAt:      firebase.database.ServerValue.TIMESTAMP
   };
 
   db.ref(`games/${friendJoinCode}`).set(gameData).then(() => {
@@ -2471,8 +2545,11 @@ function joinFriendGame() {
 
     playerId       = currentUser.uid;
     friendJoinCode = code;
-    myColor        = 'w';   // joiner plays white
-    isFlipped      = false; // white at bottom for joiner
+    // Joiner gets the opposite color of the host
+    const hostColor   = gameData.hostColor || 'b';
+    const joinerColor = hostColor === 'b' ? 'w' : 'b';
+    myColor        = joinerColor;
+    isFlipped      = (joinerColor === 'b'); // joiner's pieces at the bottom
     gameMode       = 'friend';
     joinerUsername = currentUsername;
     hostUsername   = gameData.usernames ? gameData.usernames.host : 'Opponent';
@@ -2480,7 +2557,7 @@ function joinFriendGame() {
     const updates = {};
     updates[`games/${code}/players/joiner`]          = playerId;
     updates[`games/${code}/usernames/joiner`]        = currentUsername;
-    updates[`games/${code}/colors/${playerId}`]      = 'w';
+    updates[`games/${code}/colors/${playerId}`]      = joinerColor;
 
     db.ref().update(updates).then(() => {
       closeModal('friendModal');
