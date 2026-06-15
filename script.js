@@ -37,8 +37,11 @@ function initFirebase() {
           const username = snap.val() || 'Player';
           currentUsername = username;
           updateAccountUI(username);
+          startMatchRequestListener();
+          startMatchAcceptedListener();
         });
       } else {
+        stopMatchRequestListener();
         currentUsername = null;
         updateAccountUI(null);
       }
@@ -1513,7 +1516,19 @@ async function loadFriendsModal() {
       row.innerHTML = `
         <span class="friend-avatar">${fname.charAt(0).toUpperCase()}</span>
         <span class="friend-name">${fname}</span>
-        <button class="btn btn-sm btn-ghost btn-danger-ghost" onclick="removeFriend('${fuid}','${fname}')">Remove</button>
+        <div class="friend-actions">
+          <button class="btn btn-sm btn-ghost btn-danger-ghost" onclick="removeFriend('${fuid}','${fname}')">Remove</button>
+          <div class="friend-more-wrap">
+            <button class="friend-more-btn" title="More options" onclick="toggleFriendMenu(event, '${fuid}')">
+              <svg viewBox="0 0 20 20" fill="currentColor" width="16" height="16"><path d="M6 10a2 2 0 11-4 0 2 2 0 014 0zM12 10a2 2 0 11-4 0 2 2 0 014 0zM16 12a2 2 0 100-4 2 2 0 000 4z"/></svg>
+            </button>
+            <div class="friend-more-menu" id="friendMenu_${fuid}" style="display:none;">
+              <button class="friend-more-item" onclick="sendMatchRequest('${fuid}','${fname}')">
+                ♟ New Match
+              </button>
+            </div>
+          </div>
+        </div>
       `;
       friendsList.appendChild(row);
     }
@@ -1632,6 +1647,208 @@ async function addFriendByUsername(username) {
   if (alreadySnap.exists()) { alert('Already friends!'); return; }
   await db.ref(`users/${targetUid}/friendRequests/${currentUser.uid}`).set(true);
   alert(`Friend request sent to ${username}!`);
+}
+
+/* ══════════════════════════════════════════
+   MATCH REQUESTS
+══════════════════════════════════════════ */
+
+// Toggle the ⋯ popup for a specific friend row
+function toggleFriendMenu(e, fuid) {
+  e.stopPropagation();
+  // Close any other open menus first
+  document.querySelectorAll('.friend-more-menu').forEach(m => {
+    if (m.id !== `friendMenu_${fuid}`) m.style.display = 'none';
+  });
+  const menu = document.getElementById(`friendMenu_${fuid}`);
+  if (menu) menu.style.display = menu.style.display === 'block' ? 'none' : 'block';
+}
+
+// Close ⋯ menus when clicking elsewhere
+document.addEventListener('click', () => {
+  document.querySelectorAll('.friend-more-menu').forEach(m => m.style.display = 'none');
+});
+
+async function sendMatchRequest(toUid, toUsername) {
+  if (!currentUser) return;
+  // Close the menu
+  document.getElementById(`friendMenu_${toUid}`)?.style && (document.getElementById(`friendMenu_${toUid}`).style.display = 'none');
+
+  // Write the request into the target user's matchRequests node
+  const requestData = {
+    fromUid:      currentUser.uid,
+    fromUsername: currentUsername,
+    sentAt:       firebase.database.ServerValue.TIMESTAMP
+  };
+  await db.ref(`users/${toUid}/matchRequests/${currentUser.uid}`).set(requestData);
+
+  // Brief feedback in the friends modal
+  const list = document.getElementById('friendsList');
+  if (list) {
+    const flash = document.createElement('p');
+    flash.style.cssText = 'font-size:0.78rem;color:var(--green-bright);margin-top:6px;';
+    flash.textContent = `Match request sent to ${toUsername}!`;
+    list.parentNode.insertBefore(flash, list.nextSibling);
+    setTimeout(() => flash.remove(), 3000);
+  }
+}
+
+// Listen for incoming match requests — starts after Firebase init
+let matchRequestListener = null;
+
+function startMatchRequestListener() {
+  if (!currentUser || !db) return;
+  const uid = currentUser.uid;
+
+  if (matchRequestListener) {
+    db.ref(`users/${uid}/matchRequests`).off('child_added', matchRequestListener);
+  }
+
+  matchRequestListener = db.ref(`users/${uid}/matchRequests`).on('child_added', snap => {
+    const req = snap.val();
+    if (!req) return;
+    showMatchRequestNotification(snap.key, req.fromUsername, req.fromUid);
+  });
+}
+
+function stopMatchRequestListener() {
+  if (matchRequestListener && currentUser && db) {
+    db.ref(`users/${currentUser.uid}/matchRequests`).off('child_added', matchRequestListener);
+    matchRequestListener = null;
+  }
+}
+
+function showMatchRequestNotification(reqKey, fromUsername, fromUid) {
+  const container = document.getElementById('matchNotifContainer');
+  if (!container) return;
+
+  // Don't show duplicate toasts for the same request
+  if (document.getElementById(`matchNotif_${reqKey}`)) return;
+
+  const toast = document.createElement('div');
+  toast.className = 'match-notif';
+  toast.id = `matchNotif_${reqKey}`;
+  toast.innerHTML = `
+    <div class="match-notif-icon">♟</div>
+    <div class="match-notif-body">
+      <p class="match-notif-title"><strong>${fromUsername}</strong> would like to play a match</p>
+      <div class="match-notif-actions">
+        <button class="btn btn-sm btn-primary" onclick="acceptMatchRequest('${reqKey}','${fromUid}','${fromUsername}')">Accept</button>
+        <button class="btn btn-sm btn-ghost"   onclick="declineMatchRequest('${reqKey}')">Decline</button>
+      </div>
+    </div>
+    <button class="match-notif-close" onclick="dismissMatchNotif('${reqKey}')" title="Dismiss">✕</button>
+  `;
+  container.appendChild(toast);
+
+  // Animate in
+  requestAnimationFrame(() => toast.classList.add('match-notif-show'));
+}
+
+function dismissMatchNotif(reqKey) {
+  const toast = document.getElementById(`matchNotif_${reqKey}`);
+  if (!toast) return;
+  toast.classList.remove('match-notif-show');
+  setTimeout(() => toast.remove(), 300);
+}
+
+async function acceptMatchRequest(reqKey, fromUid, fromUsername) {
+  // Remove the request from Firebase
+  await db.ref(`users/${currentUser.uid}/matchRequests/${reqKey}`).remove();
+  dismissMatchNotif(reqKey);
+
+  // Close friends modal if open
+  closeModal('friendsModal');
+
+  // The accepting user becomes the host (black), sender becomes joiner (white)
+  // We reuse the existing friend game flow — just auto-create and share code
+  // by opening the friend modal pre-filled as host
+  myColor        = 'b';
+  hostUsername   = currentUsername;
+  joinerUsername = fromUsername;
+
+  // Generate a join code and write the game to Firebase, then notify the sender
+  playerId       = currentUser.uid;
+  friendJoinCode = generateJoinCode();
+  gameMode       = 'friend';
+
+  const gameData = {
+    players:     { host: playerId },
+    usernames:   { host: currentUsername },
+    colors:      { [playerId]: 'b' },
+    board:       boardToFirebase(INITIAL_BOARD),
+    currentTurn: 'w',
+    moveHistory: [],
+    gameOver:    false,
+    createdAt:   firebase.database.ServerValue.TIMESTAMP
+  };
+
+  await db.ref(`games/${friendJoinCode}`).set(gameData);
+
+  // Notify the requester with the join code
+  await db.ref(`users/${fromUid}/matchAccepted/${currentUser.uid}`).set({
+    joinCode:        friendJoinCode,
+    acceptedBy:      currentUsername,
+    acceptedByUid:   currentUser.uid
+  });
+
+  // Start listening for the game
+  setupGameListener(friendJoinCode, false);
+
+  // Show a small modal telling this player to wait
+  showMatchAcceptedWaiting(fromUsername, friendJoinCode);
+}
+
+function showMatchAcceptedWaiting(fromUsername, code) {
+  // Reuse the friend modal to show the waiting state
+  document.getElementById('friendModal').style.display = 'flex';
+  document.getElementById('joinCodeDisplay').style.display = 'block';
+  document.getElementById('joinCodeBox').textContent = code;
+  document.getElementById('waitingMsg').style.display = 'block';
+  document.getElementById('waitingMsg').textContent = `⏳ Waiting for ${fromUsername} to join…`;
+}
+
+async function declineMatchRequest(reqKey) {
+  await db.ref(`users/${currentUser.uid}/matchRequests/${reqKey}`).remove();
+  dismissMatchNotif(reqKey);
+}
+
+// Listen for match accepted notifications (for the player who sent the request)
+let matchAcceptedListener = null;
+
+function startMatchAcceptedListener() {
+  if (!currentUser || !db) return;
+  const uid = currentUser.uid;
+
+  if (matchAcceptedListener) {
+    db.ref(`users/${uid}/matchAccepted`).off('child_added', matchAcceptedListener);
+  }
+
+  matchAcceptedListener = db.ref(`users/${uid}/matchAccepted`).on('child_added', snap => {
+    const data = snap.val();
+    if (!data) return;
+
+    // Remove the notification from DB
+    db.ref(`users/${uid}/matchAccepted/${snap.key}`).remove();
+
+    // Auto-join the game
+    friendJoinCode = data.joinCode;
+    playerId       = currentUser.uid;
+    myColor        = 'w';
+    gameMode       = 'friend';
+    joinerUsername = currentUsername;
+    hostUsername   = data.acceptedBy;
+
+    const updates = {};
+    updates[`games/${data.joinCode}/players/joiner`]     = playerId;
+    updates[`games/${data.joinCode}/usernames/joiner`]   = currentUsername;
+    updates[`games/${data.joinCode}/colors/${playerId}`] = 'w';
+
+    db.ref().update(updates).then(() => {
+      closeModal('friendsModal');
+      setupGameListener(friendJoinCode, true);
+    });
+  });
 }
 
 /* ══════════════════════════════════════════

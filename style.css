@@ -1040,3 +1040,141 @@ body {
   padding: 8px 12px;
   margin-bottom: 10px;
 }
+
+/* ══════════════════════════════════════════
+   FRIEND ROW — MORE BUTTON & POPUP
+══════════════════════════════════════════ */
+.friend-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+
+.friend-more-wrap {
+  position: relative;
+}
+
+.friend-more-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius);
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 0;
+  transition: background 0.12s, color 0.12s;
+}
+.friend-more-btn:hover {
+  background: var(--bg-card-hover);
+  color: var(--text-primary);
+}
+
+.friend-more-menu {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  right: 0;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 6px 20px rgba(0,0,0,0.45);
+  min-width: 130px;
+  z-index: 300;
+  overflow: hidden;
+}
+
+.friend-more-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  background: none;
+  border: none;
+  color: var(--text-primary);
+  font-family: 'Inter', sans-serif;
+  font-size: 0.85rem;
+  padding: 10px 14px;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.12s;
+  white-space: nowrap;
+}
+.friend-more-item:hover { background: var(--bg-card-hover); }
+
+/* ══════════════════════════════════════════
+   MATCH REQUEST TOAST NOTIFICATIONS
+══════════════════════════════════════════ */
+#matchNotifContainer {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  z-index: 500;
+  pointer-events: none;
+}
+
+.match-notif {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  background: var(--bg-card);
+  border: 1px solid var(--green-dark);
+  border-left: 4px solid var(--green-bright);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 8px 28px rgba(0,0,0,0.5);
+  padding: 14px 14px 14px 14px;
+  min-width: 280px;
+  max-width: 340px;
+  pointer-events: all;
+  opacity: 0;
+  transform: translateX(20px);
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+.match-notif.match-notif-show {
+  opacity: 1;
+  transform: translateX(0);
+}
+
+.match-notif-icon {
+  font-size: 1.4rem;
+  line-height: 1;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.match-notif-body {
+  flex: 1;
+}
+
+.match-notif-title {
+  font-size: 0.875rem;
+  color: var(--text-primary);
+  margin-bottom: 10px;
+  line-height: 1.4;
+}
+
+.match-notif-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.match-notif-close {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 0.8rem;
+  padding: 2px 4px;
+  align-self: flex-start;
+  flex-shrink: 0;
+  line-height: 1;
+  transition: color 0.12s;
+}
+.match-notif-close:hover { color: var(--text-primary); }
