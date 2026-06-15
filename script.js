@@ -2239,28 +2239,36 @@ function startDmNotifListener() {
 
   db.ref(`users/${uid}/friends`).once('value').then(snap => {
     const friends = snap.val() || {};
-    const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
 
     Object.keys(friends).forEach(fuid => {
-      const chatId = dmChatId(uid, fuid);
-      db.ref(`chats/${chatId}`).orderByChild('sentAt').startAt(oneDayAgo)
-        .on('child_added', snap => {
-          const msg = snap.val();
-          if (!msg || msg.uid === uid) return;
-          const modalOpen = document.getElementById('messagesModal').style.display !== 'none';
-          const inThread  = activeDmUid === fuid;
-          if (!modalOpen || !inThread) {
-            dmUnreadCounts[fuid] = (dmUnreadCounts[fuid] || 0) + 1;
-            updateUnreadBadge();
-            pushNotif({
-              type:        'message',
-              icon:        '💬',
-              title:       `New message from <strong>${msg.username}</strong>`,
-              body:        msg.text.substring(0, 60) + (msg.text.length > 60 ? '…' : ''),
-              actions:     [{ label: 'Open', cls: 'btn-primary', onclick: `openMessagesModal(); openDmChat('${fuid}','${msg.username}')` }],
-              autoDismiss: NOTIF_AUTO_DISMISS_MS
+      const chatId    = dmChatId(uid, fuid);
+      // Track when listener starts so we ignore historical messages on replay
+      const listenStart = Date.now();
+      let initialLoadDone = false;
+
+      // Get the last message key so we can skip everything before it
+      db.ref(`chats/${chatId}`).orderByChild('sentAt').limitToLast(1)
+        .once('value').then(lastSnap => {
+          // Now attach a real-time listener starting after existing messages
+          db.ref(`chats/${chatId}`).orderByChild('sentAt').startAt(listenStart)
+            .on('child_added', msgSnap => {
+              const msg = msgSnap.val();
+              if (!msg || msg.uid === uid) return;
+              const modalOpen = document.getElementById('messagesModal').style.display !== 'none';
+              const inThread  = activeDmUid === fuid;
+              if (!modalOpen || !inThread) {
+                dmUnreadCounts[fuid] = (dmUnreadCounts[fuid] || 0) + 1;
+                updateUnreadBadge();
+                pushNotif({
+                  type:        'message',
+                  icon:        '💬',
+                  title:       `New message from <strong>${msg.username}</strong>`,
+                  body:        msg.text.substring(0, 60) + (msg.text.length > 60 ? '…' : ''),
+                  actions:     [{ label: 'Open', cls: 'btn-primary', onclick: `openMessagesModal(); openDmChat('${fuid}','${msg.username}')` }],
+                  autoDismiss: NOTIF_AUTO_DISMISS_MS
+                });
+              }
             });
-          }
         });
     });
   });
