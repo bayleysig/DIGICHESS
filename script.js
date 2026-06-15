@@ -1202,7 +1202,6 @@ function generateFEN() {
 ══════════════════════════════════════════ */
 document.addEventListener('keydown', e => {
   if (e.key === 'z' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); undoMove(); }
-  if (e.key === 'f') flipBoard();
   if (e.key === 'Escape') {
     closeModal('promotionModal');
     closeModal('authModal');
