@@ -1535,17 +1535,19 @@ body {
 /* ── Quick Play — single button ── */
 .qp-solo-btn {
   display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 14px;
+  justify-content: center;
+  gap: 6px;
   width: 100%;
-  padding: 16px 20px;
+  padding: 20px;
   background: var(--bg-panel);
   border: 1px solid var(--border);
   border-radius: var(--radius);
   cursor: pointer;
   transition: all 0.15s;
   color: var(--text-primary);
-  text-align: left;
+  text-align: center;
 }
 .qp-solo-btn:hover {
   background: var(--green-subtle);
@@ -1553,9 +1555,9 @@ body {
   transform: translateY(-1px);
   box-shadow: 0 4px 16px var(--green-glow);
 }
-.qp-solo-icon { font-size: 1.8rem; line-height: 1; flex-shrink: 0; }
+.qp-solo-icon  { font-size: 2rem; line-height: 1; }
 .qp-solo-label { font-size: 1rem; font-weight: 700; color: var(--text-primary); }
-.qp-solo-sub   { font-size: 0.78rem; color: var(--text-muted); margin-top: 1px; }
+.qp-solo-sub   { font-size: 0.78rem; color: var(--text-muted); }
 
 /* Remove the old qp-grid styles (kept for reference, no-op now) */
 .qp-grid { display: none; }

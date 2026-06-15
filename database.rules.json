@@ -1,0 +1,46 @@
+{
+  "rules": {
+    "users": {
+      "$uid": {
+        ".read": "$uid === auth.uid",
+        ".write": "$uid === auth.uid"
+      }
+    },
+    "usernames": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "games": {
+      "$gameId": {
+        ".read": "auth != null",
+        ".write": "auth != null && (
+          !data.exists() ||
+          data.child('players').child('host').val() === auth.uid ||
+          data.child('players').child('joiner').val() === auth.uid
+        )"
+      }
+    },
+    "matchmaking": {
+      ".read": "auth != null",
+      "$uid": {
+        ".write": "auth != null && ($uid === auth.uid || !data.exists())"
+      }
+    },
+    "matchmakingPairs": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "chats": {
+      "$chatId": {
+        ".read": "auth != null",
+        ".write": "auth != null"
+      }
+    },
+    "friends": {
+      "$uid": {
+        ".read": "$uid === auth.uid",
+        ".write": "$uid === auth.uid"
+      }
+    }
+  }
+}

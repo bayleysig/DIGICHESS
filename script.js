@@ -2871,11 +2871,25 @@ function setupGameListener(code, closeOnStart) {
       // Black (host):   isFlipped = true  → black at bottom
       isFlipped = (localMyColor === 'b');
 
-      // Use Firebase as the authoritative source for usernames
-      if (gameData.usernames) {
-        hostUsername   = gameData.usernames.host   || hostUsername;
-        joinerUsername = gameData.usernames.joiner || joinerUsername;
+      // Write our own username into the game data so the opponent can read it,
+      // correcting any placeholder written by the matchmaking creator.
+      const mySlot = localMyColor === 'b' ? 'host' : 'joiner';
+      if (currentUsername && friendGameRef) {
+        friendGameRef.child(`usernames/${mySlot}`).set(currentUsername);
       }
+
+      // Use Firebase as the authoritative source for usernames.
+      // Fall back to already-set local values if Firebase has a placeholder.
+      if (gameData.usernames) {
+        const fbHost   = gameData.usernames.host;
+        const fbJoiner = gameData.usernames.joiner;
+        if (fbHost   && fbHost   !== 'Opponent') hostUsername   = fbHost;
+        if (fbJoiner && fbJoiner !== 'Opponent') joinerUsername = fbJoiner;
+      }
+      // If our own slot is set correctly, use currentUsername to fill it
+      if (localMyColor === 'b' && currentUsername) hostUsername   = currentUsername;
+      if (localMyColor === 'w' && currentUsername) joinerUsername = currentUsername;
+
       // Derive opponent name from our color
       opponentUsername = localMyColor === 'w' ? hostUsername : joinerUsername;
 
@@ -2900,6 +2914,14 @@ function setupGameListener(code, closeOnStart) {
     if (!parsedBoard || parsedBoard.length !== 8 || parsedBoard.some(r => !r || r.length !== 8)) {
       console.error('Invalid board from Firebase:', parsedBoard);
       return;
+    }
+
+    // Re-sync usernames in case they were updated after game start
+    if (gameData.usernames) {
+      const fbHost   = gameData.usernames.host;
+      const fbJoiner = gameData.usernames.joiner;
+      if (fbHost   && fbHost   !== 'Opponent') hostUsername   = fbHost;
+      if (fbJoiner && fbJoiner !== 'Opponent') joinerUsername = fbJoiner;
     }
 
     board       = parsedBoard;
@@ -2962,23 +2984,20 @@ function syncMoveToFriend(notation) {
   if (!db || !friendGameRef || gameMode !== 'friend') return;
   
   // Only sync after our own move (the turn just switched away from us)
-  // myColor is the color we play — after our move, currentTurn flips to the other player
   const weJustMoved = (myColor === 'w' && currentTurn === 'b') || (myColor === 'b' && currentTurn === 'w');
   if (!weJustMoved) return;
 
-  try {
-    const updates = {
-      board:       boardToFirebase(board),
-      currentTurn: currentTurn,
-      moveHistory: moveHistory,
-      gameOver:    gameOver,
-      lastMove:    lastMove || null
-    };
-    
-    friendGameRef.update(updates);
-  } catch (err) {
-    console.error('Error syncing move:', err);
-  }
+  const updates = {
+    board:       boardToFirebase(board),
+    currentTurn: currentTurn,
+    moveHistory: moveHistory,
+    gameOver:    gameOver,
+    lastMove:    lastMove || null
+  };
+
+  friendGameRef.update(updates).catch(err => {
+    console.error('syncMoveToFriend failed:', err.code, err.message);
+  });
 }
 
 function exitFriendGame() {
