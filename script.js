@@ -43,10 +43,14 @@ function initFirebase() {
           const displayName = username || 'Player';
           currentUsername = displayName;
           updateAccountUI(displayName);
-          startMatchRequestListener();
-          startMatchAcceptedListener();
-          startDmNotifListener();
-          startFriendRequestNotifListener();
+          // Guests only get match-accepted listener (for quick play / friend game invites)
+          // — no social notifications (DMs, friend requests, match challenges)
+          if (!user.isAnonymous) {
+            startMatchRequestListener();
+            startDmNotifListener();
+            startFriendRequestNotifListener();
+          }
+          startMatchAcceptedListener();  // guests need this for quick play pairings
         });
       } else {
         stopMatchRequestListener();
@@ -135,13 +139,8 @@ function generateJoinCode() {
 }
 
 function openPlayOnlineModal() {
-  // Require login to play online
+  // Require any login (including guest) to play online
   if (!currentUser) {
-    openAuthModal('signup');
-    return;
-  }
-  if (currentUser.isAnonymous) {
-    alert('Guest accounts cannot play online. Sign up for a free account!');
     openAuthModal('signup');
     return;
   }
@@ -153,6 +152,12 @@ function openPlayOnlineModal() {
   document.getElementById('friendJoinCode').value             = '';
   document.getElementById('matchmakingStatus').style.display  = 'none';
   document.getElementById('qpIdle').style.display             = 'block';
+
+  // Hide Community & Stats section for guests — they have no friends/social features
+  const communitySection = document.getElementById('onlineCommunityWrapper');
+  if (communitySection) {
+    communitySection.style.display = currentUser.isAnonymous ? 'none' : 'block';
+  }
 }
 
 // Keep old name working (used internally by acceptMatchRequest flow)
@@ -1035,16 +1040,21 @@ async function updatePlayerSlotButton(color, playerName, myName) {
   // Don't show anything next to our own name
   if (playerName === myName) return;
 
-  if (!currentUser || !db) {
-    addBtn.style.display = 'inline-flex';
-    return;
-  }
+  // Guests can't add friends and can't be added as friends
+  if (!currentUser || !db) return;
+  if (currentUser.isAnonymous) return;
 
-  // Look up the opponent's UID then check friends node
+  // Look up the opponent's UID — if they're a guest their username won't be
+  // in the usernames index, so snap won't exist → no button shown
   try {
     const snap = await db.ref(`usernames/${playerName.toLowerCase()}`).once('value');
-    if (!snap.exists()) { addBtn.style.display = 'inline-flex'; return; }
+    if (!snap.exists()) return;  // guest accounts aren't in the index → hide buttons
     const oppUid = snap.val();
+
+    // Check if the opponent is a guest via their DB entry
+    const guestSnap = await db.ref(`users/${oppUid}/isGuest`).once('value');
+    if (guestSnap.val() === true) return;  // opponent is a guest → no add button
+
     const friendSnap = await db.ref(`users/${currentUser.uid}/friends/${oppUid}`).once('value');
     if (friendSnap.exists()) {
       friendBtn.style.display = 'inline-flex';
@@ -1052,7 +1062,7 @@ async function updatePlayerSlotButton(color, playerName, myName) {
       addBtn.style.display = 'inline-flex';
     }
   } catch (_) {
-    addBtn.style.display = 'inline-flex';
+    // fail silently
   }
 }
 
@@ -1349,9 +1359,11 @@ function updateAccountUI(username) {
 
     // Show/hide dropdown items based on guest status
     const friendsItem  = document.getElementById('dropdownFriends');
+    const messagesItem = document.getElementById('dropdownMessages');
     const accountItem  = document.getElementById('dropdownAccount');
     const guestUpgrade = document.getElementById('dropdownGuestUpgrade');
     if (friendsItem)  friendsItem.style.display  = isGuest ? 'none' : 'flex';
+    if (messagesItem) messagesItem.style.display  = isGuest ? 'none' : 'flex';
     if (accountItem)  accountItem.style.display  = isGuest ? 'none' : 'flex';
     if (guestUpgrade) guestUpgrade.style.display = isGuest ? 'flex' : 'none';
   } else {
@@ -2151,6 +2163,11 @@ function startMatchAcceptedListener() {
 let inGameChatListener = null;
 
 function showInGameChat() {
+  // Hide chat if either player is a guest — guests have no messaging features
+  if (currentUser && currentUser.isAnonymous) return;
+  // Also hide if opponent is a guest (their username starts with Guest_ and
+  // won't be in the usernames index, but we can check opponentUsername)
+  if (opponentUsername && opponentUsername.startsWith('Guest_')) return;
   document.getElementById('inGameChatCard').style.display = 'block';
   loadInGameChat();
 }
@@ -2487,11 +2504,6 @@ const QP_TIME_SECS        = 600;    // 10-minute rapid
 
 function findMatch() {
   if (!currentUser) { openAuthModal('signup'); return; }
-  if (currentUser.isAnonymous) {
-    alert('Guest accounts cannot use matchmaking. Sign up for a free account!');
-    openAuthModal('signup');
-    return;
-  }
   if (!db) return;
 
   const uid = currentUser.uid;
