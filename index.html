@@ -52,13 +52,17 @@
       </button>
       <!-- Dropdown menu -->
       <div class="profile-dropdown" id="profileDropdown" style="display:none;">
-        <button class="dropdown-item" onclick="openFriendsModal()">
+        <button class="dropdown-item" id="dropdownFriends" onclick="openFriendsModal()">
           <svg viewBox="0 0 20 20" fill="currentColor" width="15" height="15"><path d="M13 6a3 3 0 11-6 0 3 3 0 016 0zM18 8a2 2 0 11-4 0 2 2 0 014 0zM14 15a4 4 0 00-8 0v1h8v-1zM6 8a2 2 0 11-4 0 2 2 0 014 0zM16 18v-1a5.972 5.972 0 00-.75-2.906A3.005 3.005 0 0119 15v1h-3zM4.75 12.094A5.973 5.973 0 004 15v1H1v-1a3 3 0 013.75-2.906z"/></svg>
           Friends
         </button>
-        <button class="dropdown-item" onclick="openAccountModal()">
+        <button class="dropdown-item" id="dropdownAccount" onclick="openAccountModal()">
           <svg viewBox="0 0 20 20" fill="currentColor" width="15" height="15"><path fill-rule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clip-rule="evenodd"/></svg>
           Account
+        </button>
+        <button class="dropdown-item" id="dropdownGuestUpgrade" onclick="closeModal('nothing'); openAuthModal('signup')" style="display:none;">
+          <svg viewBox="0 0 20 20" fill="currentColor" width="15" height="15"><path fill-rule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clip-rule="evenodd"/></svg>
+          Create Account
         </button>
         <div class="dropdown-divider"></div>
         <button class="dropdown-item dropdown-item-danger" onclick="signOutUser()">
@@ -444,6 +448,9 @@
         </div>
         <div id="signUpError" class="auth-error" style="display:none;"></div>
         <button class="btn btn-primary auth-submit" id="signUpBtn" onclick="handleSignUp()">Sign Up</button>
+        <div class="auth-divider"><span>or</span></div>
+        <button class="btn btn-ghost auth-submit" onclick="continueAsGuest()">Continue as Guest</button>
+        <p class="auth-guest-note">Guest accounts are temporary and deleted when you leave.</p>
       </div>
 
       <!-- Sign In Panel -->
@@ -460,6 +467,9 @@
         </div>
         <div id="signInError" class="auth-error" style="display:none;"></div>
         <button class="btn btn-primary auth-submit" id="signInBtn" onclick="handleSignIn()">Sign In</button>
+        <div class="auth-divider"><span>or</span></div>
+        <button class="btn btn-ghost auth-submit" onclick="continueAsGuest()">Continue as Guest</button>
+        <p class="auth-guest-note">Guest accounts are temporary and deleted when you leave.</p>
       </div>
     </div>
   </div>

@@ -132,6 +132,11 @@ function openFriendModal() {
     openAuthModal('signup');
     return;
   }
+  if (currentUser.isAnonymous) {
+    alert('Guest accounts cannot play online. Sign up for a free account!');
+    openAuthModal('signup');
+    return;
+  }
   document.getElementById('friendModal').style.display = 'flex';
   document.getElementById('joinError').style.display = 'none';
   document.getElementById('joinCodeDisplay').style.display = 'none';
@@ -1199,10 +1204,20 @@ function updateAccountUI(username) {
   const signInBtn = document.getElementById('btnSignIn');
 
   if (username) {
-    avatar.textContent  = username.charAt(0).toUpperCase();
-    nameEl.textContent  = username;
+    const isGuest = currentUser && currentUser.isAnonymous;
+    avatar.textContent  = isGuest ? '?' : username.charAt(0).toUpperCase();
+    avatar.style.background = isGuest ? 'var(--text-muted)' : '';
+    nameEl.textContent  = isGuest ? `${username} (Guest)` : username;
     widget.style.display    = 'flex';
     signInBtn.style.display = 'none';
+
+    // Show/hide dropdown items based on guest status
+    const friendsItem  = document.getElementById('dropdownFriends');
+    const accountItem  = document.getElementById('dropdownAccount');
+    const guestUpgrade = document.getElementById('dropdownGuestUpgrade');
+    if (friendsItem)  friendsItem.style.display  = isGuest ? 'none' : 'flex';
+    if (accountItem)  accountItem.style.display  = isGuest ? 'none' : 'flex';
+    if (guestUpgrade) guestUpgrade.style.display = isGuest ? 'flex' : 'none';
   } else {
     widget.style.display    = 'none';
     signInBtn.style.display = 'inline-flex';
@@ -1289,6 +1304,43 @@ async function handleSignIn() {
     showAuthError(errorEl, friendlyAuthError(err.code));
     btn.disabled = false;
     btn.textContent = 'Sign In';
+  }
+}
+
+async function continueAsGuest() {
+  try {
+    // Sign in anonymously — Firebase creates a temporary account
+    const cred = await firebase.auth().signInAnonymously();
+    const uid  = cred.user.uid;
+
+    // Generate a guest display name
+    const guestName = 'Guest_' + Math.random().toString(36).substr(2, 5).toUpperCase();
+    currentUsername = guestName;
+
+    // Store temporarily in DB so game rooms can reference it
+    await db.ref(`users/${uid}/username`).set(guestName);
+    await db.ref(`users/${uid}/isGuest`).set(true);
+
+    closeModal('authModal');
+
+    // Register cleanup on tab/window close
+    window.addEventListener('beforeunload', deleteGuestAccount);
+  } catch (err) {
+    console.error('Guest sign in error:', err);
+  }
+}
+
+async function deleteGuestAccount() {
+  if (!currentUser || !currentUser.isAnonymous) return;
+  try {
+    const uid = currentUser.uid;
+    // Remove DB data
+    await db.ref(`users/${uid}`).remove();
+    // Delete the Firebase Auth account
+    await currentUser.delete();
+  } catch (err) {
+    // Best-effort — may fail if connection drops during unload
+    console.error('Guest cleanup error:', err);
   }
 }
 

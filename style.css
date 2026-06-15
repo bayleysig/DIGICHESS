@@ -1178,3 +1178,29 @@ body {
   transition: color 0.12s;
 }
 .match-notif-close:hover { color: var(--text-primary); }
+
+/* ══════════════════════════════════════════
+   GUEST AUTH UI
+══════════════════════════════════════════ */
+.auth-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 14px 0 10px;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+}
+.auth-divider::before,
+.auth-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+.auth-guest-note {
+  text-align: center;
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  margin-top: 8px;
+}
