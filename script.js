@@ -2080,12 +2080,19 @@ async function acceptMatchRequest(reqKey, fromUid, fromUsername) {
 
   const gameData = {
     players:     { host: playerId },
-    usernames:   { host: currentUsername },
+    usernames:   { host: sanitizePlayerName(currentUsername) },
     colors:      { [playerId]: 'b' },
+    hostColor:   'b',
     board:       boardToFirebase(INITIAL_BOARD),
     currentTurn: 'w',
     moveHistory: [],
     gameOver:    false,
+    lastMove:    null,
+    enPassantSq: null,
+    castlingRights: { wK: true, wQ: true, bK: true, bQ: true },
+    capturedByWhite: [],
+    capturedByBlack: [],
+    halfMoveClock: 0,
     createdAt:   firebase.database.ServerValue.TIMESTAMP
   };
 
@@ -2141,12 +2148,12 @@ function startMatchAcceptedListener() {
     myColor        = 'w';
     isFlipped      = false;  // sender is white → white at bottom
     gameMode       = 'friend';
-    joinerUsername = currentUsername;
-    hostUsername   = data.acceptedBy;
+    joinerUsername = sanitizePlayerName(currentUsername);
+    hostUsername   = sanitizePlayerName(data.acceptedBy);
 
     const updates = {};
     updates[`games/${data.joinCode}/players/joiner`]     = playerId;
-    updates[`games/${data.joinCode}/usernames/joiner`]   = currentUsername;
+    updates[`games/${data.joinCode}/usernames/joiner`]   = sanitizePlayerName(currentUsername);
     updates[`games/${data.joinCode}/colors/${playerId}`] = 'w';
 
     db.ref().update(updates).then(() => {
@@ -2463,6 +2470,77 @@ function boardFromFirebase(raw) {
   });
 }
 
+function sanitizePlayerName(name, fallback = 'Player') {
+  return (typeof name === 'string' && name.trim() && name !== 'Opponent') ? name.trim() : fallback;
+}
+
+function playerSlotForUid(gameData, uid) {
+  if (!gameData || !gameData.players || !uid) return null;
+  if (gameData.players.host === uid) return 'host';
+  if (gameData.players.joiner === uid) return 'joiner';
+  return null;
+}
+
+function playerNameForSlot(gameData, slot, fallback = 'Player') {
+  const names = gameData?.usernames || {};
+  return sanitizePlayerName(names[slot], fallback);
+}
+
+function syncLocalNamesFromGame(gameData) {
+  if (!gameData) return;
+  const mySlot = playerSlotForUid(gameData, currentUser?.uid);
+  const otherSlot = mySlot === 'host' ? 'joiner' : mySlot === 'joiner' ? 'host' : null;
+
+  hostUsername   = playerNameForSlot(gameData, 'host', hostUsername || 'Player');
+  joinerUsername = playerNameForSlot(gameData, 'joiner', joinerUsername || 'Player');
+
+  if (otherSlot) {
+    opponentUsername = playerNameForSlot(
+      gameData,
+      otherSlot,
+      otherSlot === 'host' ? hostUsername || 'Player' : joinerUsername || 'Player'
+    );
+  }
+}
+
+function gameStateForFirebase() {
+  return {
+    board:           boardToFirebase(board),
+    currentTurn:     currentTurn,
+    moveHistory:     moveHistory,
+    gameOver:        gameOver,
+    lastMove:        lastMove || null,
+    enPassantSq:     enPassantSq || null,
+    castlingRights:  castlingRights,
+    capturedByWhite: capturedByWhite,
+    capturedByBlack: capturedByBlack,
+    halfMoveClock:   halfMoveClock
+  };
+}
+
+function applySyncedGameState(gameData) {
+  const parsedBoard = boardFromFirebase(gameData.board);
+  if (!parsedBoard || parsedBoard.length !== 8 || parsedBoard.some(r => !r || r.length !== 8)) {
+    console.error('Invalid board from Firebase:', parsedBoard);
+    return false;
+  }
+
+  board           = parsedBoard;
+  currentTurn     = gameData.currentTurn || 'w';
+  moveHistory     = Array.isArray(gameData.moveHistory)
+    ? gameData.moveHistory
+    : Object.values(gameData.moveHistory || {});
+  gameOver        = !!gameData.gameOver;
+  lastMove        = gameData.lastMove || null;
+  enPassantSq     = gameData.enPassantSq || null;
+  castlingRights  = gameData.castlingRights || { wK: true, wQ: true, bK: true, bQ: true };
+  capturedByWhite = Array.isArray(gameData.capturedByWhite) ? gameData.capturedByWhite : Object.values(gameData.capturedByWhite || {});
+  capturedByBlack = Array.isArray(gameData.capturedByBlack) ? gameData.capturedByBlack : Object.values(gameData.capturedByBlack || {});
+  halfMoveClock   = Number.isFinite(gameData.halfMoveClock) ? gameData.halfMoveClock : moveHistory.length;
+
+  return true;
+}
+
 /* ══════════════════════════════════════════
    PLAY ONLINE — COLOR CHOICE & MATCHMAKING
 ══════════════════════════════════════════ */
@@ -2570,8 +2648,8 @@ function findMatch() {
       const gameData = {
         players:     { host:   iAmBlack ? uid         : opponentUid,
                        joiner: iAmBlack ? opponentUid : uid },
-        usernames:   { host:   iAmBlack ? myUsername           : resolvedOpponentName,
-                       joiner: iAmBlack ? resolvedOpponentName : myUsername },
+        usernames:   { host:   iAmBlack ? sanitizePlayerName(myUsername)           : sanitizePlayerName(resolvedOpponentName),
+                       joiner: iAmBlack ? sanitizePlayerName(resolvedOpponentName) : sanitizePlayerName(myUsername) },
         colors:      { [uid]: myColor, [opponentUid]: iAmBlack ? 'w' : 'b' },
         hostColor:   'b',
         timeControl: QP_TIME_SECS,
@@ -2579,6 +2657,12 @@ function findMatch() {
         currentTurn: 'w',
         moveHistory: [],
         gameOver:    false,
+        lastMove:    null,
+        enPassantSq: null,
+        castlingRights: { wK: true, wQ: true, bK: true, bQ: true },
+        capturedByWhite: [],
+        capturedByBlack: [],
+        halfMoveClock: 0,
         quickPlay:   true,
         createdAt:   firebase.database.ServerValue.TIMESTAMP
       };
@@ -2642,8 +2726,9 @@ function findMatch() {
       friendJoinCode = code;
       playerId       = uid;
       const names    = gameData.usernames || {};
-      hostUsername   = names.host   || 'Opponent';
-      joinerUsername = names.joiner || myUsername;
+      hostUsername   = sanitizePlayerName(names.host, 'Player');
+      joinerUsername = sanitizePlayerName(names.joiner, currentUsername || 'Player');
+      opponentUsername = myColor === 'w' ? hostUsername : joinerUsername;
 
       document.getElementById('matchmakingText').textContent = 'Found opponent! Loading\u2026';
       document.getElementById('friendModal').style.display   = 'none';
@@ -2717,7 +2802,7 @@ function createFriendGame() {
 
   const gameData = {
     players:        { host: playerId },
-    usernames:      { host: currentUsername },
+    usernames:      { host: sanitizePlayerName(currentUsername) },
     colors:         { [playerId]: resolvedColor },
     hostColor:      resolvedColor,               // so joiner knows they get the opposite
     timeControl:    tcSecs,
@@ -2725,6 +2810,12 @@ function createFriendGame() {
     currentTurn:    'w',
     moveHistory:    [],
     gameOver:       false,
+    lastMove:       null,
+    enPassantSq:    null,
+    castlingRights: { wK: true, wQ: true, bK: true, bQ: true },
+    capturedByWhite: [],
+    capturedByBlack: [],
+    halfMoveClock:  0,
     createdAt:      firebase.database.ServerValue.TIMESTAMP
   };
 
@@ -2773,12 +2864,12 @@ function joinFriendGame() {
     myColor        = joinerColor;
     isFlipped      = (joinerColor === 'b'); // joiner's pieces at the bottom
     gameMode       = 'friend';
-    joinerUsername = currentUsername;
-    hostUsername   = gameData.usernames ? gameData.usernames.host : 'Opponent';
+    joinerUsername = sanitizePlayerName(currentUsername);
+    hostUsername   = playerNameForSlot(gameData, 'host', 'Player');
 
     const updates = {};
     updates[`games/${code}/players/joiner`]          = playerId;
-    updates[`games/${code}/usernames/joiner`]        = currentUsername;
+    updates[`games/${code}/usernames/joiner`]        = sanitizePlayerName(currentUsername);
     updates[`games/${code}/colors/${playerId}`]      = joinerColor;
 
     db.ref().update(updates).then(() => {
@@ -2806,12 +2897,7 @@ function setupGameListener(code, closeOnStart) {
     const gameData    = snapshot.val();
     const playerCount = gameData.players ? Object.keys(gameData.players).length : 1;
 
-    // Sync usernames whenever available
-    if (gameData.usernames) {
-      hostUsername   = gameData.usernames.host   || hostUsername;
-      joinerUsername = gameData.usernames.joiner || joinerUsername;
-      opponentUsername = localMyColor === 'w' ? hostUsername : joinerUsername;
-    }
+    syncLocalNamesFromGame(gameData);
 
     // ── Waiting for second player ──
     if (!gameStarted) {
@@ -2826,27 +2912,21 @@ function setupGameListener(code, closeOnStart) {
       // Black (host):   isFlipped = true  → black at bottom
       isFlipped = (localMyColor === 'b');
 
-      // Write our own username into the game data so the opponent can read it,
-      // correcting any placeholder written by the matchmaking creator.
-      const mySlot = localMyColor === 'b' ? 'host' : 'joiner';
+      // Write our own username into the game data so the opponent can read it.
+      const mySlot = playerSlotForUid(gameData, currentUser?.uid) || (localMyColor === 'b' ? 'host' : 'joiner');
       if (currentUsername && friendGameRef) {
-        friendGameRef.child(`usernames/${mySlot}`).set(currentUsername);
+        friendGameRef.child(`usernames/${mySlot}`).set(sanitizePlayerName(currentUsername));
       }
 
-      // Use Firebase as the authoritative source for usernames.
-      // Fall back to already-set local values if Firebase has a placeholder.
-      if (gameData.usernames) {
-        const fbHost   = gameData.usernames.host;
-        const fbJoiner = gameData.usernames.joiner;
-        if (fbHost   && fbHost   !== 'Opponent') hostUsername   = fbHost;
-        if (fbJoiner && fbJoiner !== 'Opponent') joinerUsername = fbJoiner;
-      }
-      // If our own slot is set correctly, use currentUsername to fill it
-      if (localMyColor === 'b' && currentUsername) hostUsername   = currentUsername;
-      if (localMyColor === 'w' && currentUsername) joinerUsername = currentUsername;
-
-      // Derive opponent name from our color
-      opponentUsername = localMyColor === 'w' ? hostUsername : joinerUsername;
+      if (mySlot === 'host' && currentUsername) hostUsername = sanitizePlayerName(currentUsername);
+      if (mySlot === 'joiner' && currentUsername) joinerUsername = sanitizePlayerName(currentUsername);
+      syncLocalNamesFromGame({
+        ...gameData,
+        usernames: {
+          ...(gameData.usernames || {}),
+          [mySlot]: sanitizePlayerName(currentUsername)
+        }
+      });
 
       // Apply time control from game data (quick play sets this to 600)
       if (gameData.timeControl != null) {
@@ -2857,6 +2937,10 @@ function setupGameListener(code, closeOnStart) {
 
       gameMode = 'friend';
       initGame();      // resets board state and renders
+      applySyncedGameState(gameData);
+      renderBoard();
+      renderMoveHistory();
+      updateCapturedPieces();
       updateGameInfo();
       showInGameChat();
       // Auto-start timers for timed games
@@ -2865,33 +2949,8 @@ function setupGameListener(code, closeOnStart) {
     }
 
     // ── In-progress: apply opponent's move ──
-    const parsedBoard = boardFromFirebase(gameData.board);
-    if (!parsedBoard || parsedBoard.length !== 8 || parsedBoard.some(r => !r || r.length !== 8)) {
-      console.error('Invalid board from Firebase:', parsedBoard);
-      return;
-    }
-
-    // Re-sync usernames in case they were updated after game start
-    if (gameData.usernames) {
-      const fbHost   = gameData.usernames.host;
-      const fbJoiner = gameData.usernames.joiner;
-      if (fbHost   && fbHost   !== 'Opponent') hostUsername   = fbHost;
-      if (fbJoiner && fbJoiner !== 'Opponent') joinerUsername = fbJoiner;
-    }
-
-    board       = parsedBoard;
-    currentTurn = gameData.currentTurn;
-    moveHistory = Array.isArray(gameData.moveHistory)
-      ? gameData.moveHistory
-      : Object.values(gameData.moveHistory || {});
-    gameOver    = gameData.gameOver;
-
-    // Restore lastMove so the opponent's move gets highlighted
-    if (gameData.lastMove) {
-      lastMove = gameData.lastMove;
-    } else {
-      lastMove = null;
-    }
+    syncLocalNamesFromGame(gameData);
+    if (!applySyncedGameState(gameData)) return;
 
     // ── Rematch accepted: game was reset — close modal and restart ──
     if (!gameData.gameOver && !gameData.gameOverTitle) {
@@ -2908,6 +2967,7 @@ function setupGameListener(code, closeOnStart) {
     renderBoard();
     renderMoveHistory();
     updateStatusBar();
+    updateCapturedPieces();
     updateGameInfo();
 
     // Show game over modal if opponent triggered it (resign/checkmate synced)
@@ -2944,13 +3004,7 @@ function syncMoveToFriend(notation) {
   const weJustMoved = (myColor === 'w' && currentTurn === 'b') || (myColor === 'b' && currentTurn === 'w');
   if (!weJustMoved) return;
 
-  const updates = {
-    board:       boardToFirebase(board),
-    currentTurn: currentTurn,
-    moveHistory: moveHistory,
-    gameOver:    gameOver,
-    lastMove:    lastMove || null
-  };
+  const updates = gameStateForFirebase();
 
   friendGameRef.update(updates).then(() => {
     console.log('syncMove: success, turn now', currentTurn);
@@ -3004,7 +3058,12 @@ function acceptRematch() {
     gameOverReason: null,
     gameOverWinner: null,
     rematchRequest: null,
-    lastMove:       null
+    lastMove:       null,
+    enPassantSq:    null,
+    castlingRights: { wK: true, wQ: true, bK: true, bQ: true },
+    capturedByWhite: [],
+    capturedByBlack: [],
+    halfMoveClock:  0
   };
   friendGameRef.update(resetData).then(() => {
     closeModal('gameOverModal');
