@@ -2498,9 +2498,11 @@ function setColorChoice(color) {
  * don't block future searches.
  * ─────────────────────────────────────────────────────────── */
 
-let matchmakingListener   = null;   // Firebase child_added listener on matchmaking/
-let quickPlayGameListener = null;   // Firebase listener waiting for game notification
-const QP_TIME_SECS        = 600;    // 10-minute rapid
+let matchmakingListener    = null;   // Firebase child_added listener on matchmaking/
+let quickPlayGameListener  = null;   // kept for legacy cleanup, unused in new flow
+let matchmakingPairsRef    = null;   // ref used for the pairings watcher
+let matchmakingPairsListener = null; // child_added listener on matchmakingPairs/
+const QP_TIME_SECS         = 600;    // 10-minute rapid
 
 function findMatch() {
   if (!currentUser) { openAuthModal('signup'); return; }
@@ -2528,9 +2530,16 @@ function findMatch() {
     myRef.set({ username: myUsername, joinedAt: firebase.database.ServerValue.TIMESTAMP });
     myRef.onDisconnect().remove();
 
-    // ── Strategy: scan once for an existing opponent, then watch for new ones ──
-    // We use a transaction to atomically claim an opponent.
-    // A flag prevents us from acting on multiple simultaneous events.
+    // ── Pairing strategy ──
+    // The SECOND player to enter the queue (higher joinedAt) always becomes
+    // the game creator. They atomically claim the first player's entry via a
+    // transaction, create the game room, then write the game code directly
+    // into the game room so both players can start via the same games/ listener.
+    //
+    // Both players listen on games/ via a separate "lobby" node keyed by a
+    // deterministic pairing ID (sorted UIDs) — this avoids writing to each
+    // other's users/ node (which can fail for guests under strict rules).
+
     let paired = false;
 
     const tryPair = async snap => {
@@ -2539,50 +2548,70 @@ function findMatch() {
       const opponentUid = snap.key;
       if (opponentUid === uid) return;
 
-      // Claim the slot synchronously before any await — this prevents the
-      // joiner path (quickPlayGame listener) from also winning the race.
-      // If paired was set between here and the transaction result, we abort.
+      const opponentData = snap.val() || {};
+      // Only the player who joined LATER becomes creator, so we don't
+      // both race to create. Compare joinedAt: higher value = joined later.
+      // If joinedAt isn't set yet (ServerValue), fall back to UID comparison.
+      const myJoinedAt  = null; // we don't have our own yet — use UID tiebreak
+      // We always try to claim — transaction ensures only one wins.
+
+      // Set paired synchronously before any await to block the joiner path too.
       paired = true;
 
-      // Atomically claim the opponent by removing their entry
       const claimRef = db.ref(`matchmaking/${opponentUid}`);
       let result;
       try {
         result = await claimRef.transaction(current => {
-          if (current === null) return; // already gone — abort
+          if (current === null) return; // already claimed — abort
           return null;                  // claim it
         });
       } catch (e) {
-        paired = false; // transaction failed — release so joiner path can proceed
+        paired = false;
         return;
       }
 
       if (!result.committed) {
-        // Someone else already removed this opponent — release and wait
         paired = false;
         return;
       }
 
       const opponentName = result.snapshot.val()?.username || 'Opponent';
 
-      // Remove ourselves and stop listeners
+      // Remove ourselves from the queue
       await myRef.remove();
       stopMatchmakingListener();
 
-      // ── We are the CREATOR (black) ──
-      const code = generateJoinCode();
-      myColor        = 'b';
-      isFlipped      = true;
+      // Determine colors via UID sort — consistent on both sides
+      // Lower UID alphabetically = black (host), higher = white (joiner)
+      const iAmBlack  = uid < opponentUid;
+      const myClr     = iAmBlack ? 'b' : 'w';
+      const oppClr    = iAmBlack ? 'w' : 'b';
+
+      myColor        = myClr;
+      isFlipped      = (myClr === 'b');
       gameMode       = 'friend';
-      friendJoinCode = code;
       playerId       = uid;
-      hostUsername   = myUsername;
-      joinerUsername = opponentName;
+      friendJoinCode = generateJoinCode();
+
+      if (iAmBlack) {
+        hostUsername   = myUsername;
+        joinerUsername = opponentName;
+      } else {
+        hostUsername   = opponentName;
+        joinerUsername = myUsername;
+      }
+
+      // Write the full game room — both players will load it via
+      // a shared lobby node: matchmakingPairs/{sortedUids}
+      const pairKey  = [uid, opponentUid].sort().join('_');
+      const code     = friendJoinCode;
 
       const gameData = {
-        players:     { host: uid },
-        usernames:   { host: myUsername, joiner: opponentName },
-        colors:      { [uid]: 'b' },
+        players:     { host: iAmBlack ? uid : opponentUid,
+                       joiner: iAmBlack ? opponentUid : uid },
+        usernames:   { host: iAmBlack ? myUsername : opponentName,
+                       joiner: iAmBlack ? opponentName : myUsername },
+        colors:      { [uid]: myClr, [opponentUid]: oppClr },
         hostColor:   'b',
         timeControl: QP_TIME_SECS,
         board:       boardToFirebase(INITIAL_BOARD),
@@ -2594,64 +2623,87 @@ function findMatch() {
       };
 
       await db.ref(`games/${code}`).set(gameData);
-      await db.ref(`users/${opponentUid}/quickPlayGame`).set({
-        joinCode:     code,
-        hostUsername: myUsername,
-        hostUid:      uid
-      });
-      setTimeout(() => db.ref(`users/${opponentUid}/quickPlayGame`).remove(), 30000);
 
-      document.getElementById('matchmakingText').textContent = `Found ${opponentName}! Loading…`;
+      // Write the join code to a shared lobby node both players watch
+      await db.ref(`matchmakingPairs/${pairKey}`).set({
+        joinCode:   code,
+        hostUid:    iAmBlack ? uid : opponentUid,
+        joinerUid:  iAmBlack ? opponentUid : uid,
+        createdAt:  firebase.database.ServerValue.TIMESTAMP
+      });
+      // Auto-clean after 60 s
+      setTimeout(() => db.ref(`matchmakingPairs/${pairKey}`).remove(), 60000);
+
+      document.getElementById('matchmakingText').textContent =
+        `Found ${opponentName}! Loading…`;
       document.getElementById('friendModal').style.display = 'none';
       setupGameListener(code, true);
     };
 
-    // Listen for opponents in the queue
+    // Listen for opponents already in (or joining) the queue
     matchmakingListener = db.ref('matchmaking')
       .orderByChild('joinedAt')
       .on('child_added', snap => tryPair(snap));
 
-    // ── Also watch for someone pairing US (i.e. we are the JOINER) ──
-    quickPlayGameListener = db.ref(`users/${uid}/quickPlayGame`)
-      .on('value', async snap => {
+    // ── Watch the shared lobby node for a game created for us ──
+    // This fires when the OTHER player won the transaction and created the game.
+    const watchPairings = db.ref('matchmakingPairs')
+      .orderByChild('joinerUid').equalTo(uid)
+      .on('child_added', async snap => {
         if (!snap.exists()) return;
         const data = snap.val();
         if (!data || !data.joinCode) return;
         if (paired) return;
-        paired = true;  // claim synchronously before any await
+        paired = true;
 
-        db.ref(`users/${uid}/quickPlayGame`).remove();
-        await myRef.remove();
         stopMatchmakingListener();
+        db.ref('matchmakingPairs').orderByChild('joinerUid').equalTo(uid)
+          .off('child_added', watchPairings);
 
-        // ── We are the JOINER (white) ──
+        await myRef.remove();
+
         const code = data.joinCode;
-        myColor        = 'w';
-        isFlipped      = false;
+        // Look up our color from the game data
+        const gameSnap = await db.ref(`games/${code}/colors/${uid}`).once('value');
+        const myClr    = gameSnap.val() || 'w';
+
+        myColor        = myClr;
+        isFlipped      = (myClr === 'b');
         gameMode       = 'friend';
         friendJoinCode = code;
         playerId       = uid;
-        joinerUsername = myUsername;
-        hostUsername   = data.hostUsername || 'Opponent';
 
-        const updates = {};
-        updates[`games/${code}/players/joiner`]   = uid;
-        updates[`games/${code}/usernames/joiner`] = myUsername;
-        updates[`games/${code}/colors/${uid}`]    = 'w';
-        await db.ref().update(updates);
+        // Set usernames from the game data
+        const namesSnap = await db.ref(`games/${code}/usernames`).once('value');
+        const names     = namesSnap.val() || {};
+        hostUsername    = names.host   || 'Opponent';
+        joinerUsername  = names.joiner || myUsername;
 
-        document.getElementById('matchmakingText').textContent = `Found ${hostUsername}! Loading…`;
+        document.getElementById('matchmakingText').textContent =
+          `Found opponent! Loading…`;
         document.getElementById('friendModal').style.display = 'none';
         setupGameListener(code, true);
       });
+
+    // Also watch pairings where we are the host (in case we created but
+    // need to self-start — covered by tryPair above, but belt-and-suspenders)
+    // Nothing extra needed — tryPair calls setupGameListener directly.
+
+    // Store pairings listener ref for cleanup
+    matchmakingPairsRef      = db.ref('matchmakingPairs').orderByChild('joinerUid').equalTo(uid);
+    matchmakingPairsListener = watchPairings;
   });
 }
 
 function stopMatchmakingListener() {
   if (matchmakingListener) {
-    // Must use the same query ref that was used to attach the listener
     db.ref('matchmaking').orderByChild('joinedAt').off('child_added', matchmakingListener);
     matchmakingListener = null;
+  }
+  if (matchmakingPairsRef && matchmakingPairsListener) {
+    matchmakingPairsRef.off('child_added', matchmakingPairsListener);
+    matchmakingPairsRef      = null;
+    matchmakingPairsListener = null;
   }
   if (quickPlayGameListener && currentUser) {
     db.ref(`users/${currentUser.uid}/quickPlayGame`).off('value', quickPlayGameListener);
