@@ -95,7 +95,7 @@ let enPassantSq  = null;        // { row, col } eligible target or null
 let castlingRights = { wK: true, wQ: true, bK: true, bQ: true };
 let capturedByWhite = [];       // pieces white has taken
 let capturedByBlack = [];       // pieces black has taken
-let isFlipped    = true;        // board orientation (white at bottom)
+let isFlipped    = false;       // board orientation: false = white at bottom, true = black at bottom
 let gameOver     = false;
 let halfMoveClock = 0;          // for display
 
@@ -179,6 +179,11 @@ function newGame() {
   closeModal('gameOverModal');
   stopTimers();
   resetTimers();
+  // In online games orientation is set by setupGameListener before initGame is called.
+  // For local games (pvp / ai) always start with white at the bottom.
+  if (gameMode !== 'friend') {
+    isFlipped = false;
+  }
   initGame();
 }
 
@@ -2508,9 +2513,9 @@ function setupGameListener(code, closeOnStart) {
       gameStarted = true;
       closeModal('friendModal');
 
-      // White (joiner) has board normal (isFlipped = true = white at bottom)
-      // Black (host)   has board flipped  (isFlipped = false = black at bottom)
-      isFlipped = (myColor === 'w');
+      // White (joiner): isFlipped = false → white at bottom
+      // Black (host):   isFlipped = true  → black at bottom
+      isFlipped = (myColor === 'b');
 
       gameMode = 'friend';
       initGame();      // resets board state and renders
@@ -2545,7 +2550,7 @@ function setupGameListener(code, closeOnStart) {
       const modalOpen = document.getElementById('gameOverModal').style.display !== 'none';
       if (modalOpen) {
         closeModal('gameOverModal');
-        isFlipped = (myColor === 'w');
+        isFlipped = (myColor === 'b');
         initGame();
         updateGameInfo();
         return;
@@ -2654,7 +2659,7 @@ function acceptRematch() {
   };
   friendGameRef.update(resetData).then(() => {
     closeModal('gameOverModal');
-    isFlipped = (myColor === 'w');
+    isFlipped = (myColor === 'b');
     initGame();
     updateGameInfo();
   });
