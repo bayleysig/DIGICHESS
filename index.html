@@ -45,9 +45,23 @@
 
     <!-- Account indicator (shown when logged in) -->
     <div class="account-widget" id="accountWidget" style="display:none;">
-      <span class="account-avatar" id="accountAvatar"></span>
-      <span class="account-username" id="accountUsername"></span>
-      <button class="btn btn-sm btn-ghost" onclick="signOutUser()">Sign Out</button>
+      <button class="account-trigger" onclick="openProfileDropdown()" aria-haspopup="true">
+        <span class="account-avatar" id="accountAvatar"></span>
+        <span class="account-username" id="accountUsername"></span>
+        <svg class="dropdown-caret" viewBox="0 0 20 20" fill="currentColor" width="12" height="12"><path fill-rule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clip-rule="evenodd"/></svg>
+      </button>
+      <!-- Dropdown menu -->
+      <div class="profile-dropdown" id="profileDropdown" style="display:none;">
+        <button class="dropdown-item" onclick="openFriendsModal()">
+          <svg viewBox="0 0 20 20" fill="currentColor" width="15" height="15"><path d="M13 6a3 3 0 11-6 0 3 3 0 016 0zM18 8a2 2 0 11-4 0 2 2 0 014 0zM14 15a4 4 0 00-8 0v1h8v-1zM6 8a2 2 0 11-4 0 2 2 0 014 0zM16 18v-1a5.972 5.972 0 00-.75-2.906A3.005 3.005 0 0119 15v1h-3zM4.75 12.094A5.973 5.973 0 004 15v1H1v-1a3 3 0 013.75-2.906z"/></svg>
+          Friends
+        </button>
+        <div class="dropdown-divider"></div>
+        <button class="dropdown-item dropdown-item-danger" onclick="signOutUser()">
+          <svg viewBox="0 0 20 20" fill="currentColor" width="15" height="15"><path fill-rule="evenodd" d="M3 3a1 1 0 00-1 1v12a1 1 0 001 1h12a1 1 0 001-1V4a1 1 0 00-1-1H3zm10.293 9.293a1 1 0 001.414 1.414l3-3a1 1 0 000-1.414l-3-3a1 1 0 10-1.414 1.414L14.586 9H7a1 1 0 100 2h7.586l-1.293 1.293z" clip-rule="evenodd"/></svg>
+          Sign Out
+        </button>
+      </div>
     </div>
     <!-- Sign in button (shown when logged out) -->
     <button class="btn btn-sm btn-primary" id="btnSignIn" onclick="openAuthModal()" style="display:none;">
@@ -178,6 +192,31 @@
           <div class="info-row"><span>Status</span><span id="infoStatus" class="status-active">Active</span></div>
           <div class="info-row"><span>Half-moves</span><span id="infoMoves">0</span></div>
         </div>
+        <!-- Online game player names (shown in friend mode) -->
+        <div id="playerNamesSection" style="display:none; margin-top:12px; border-top:1px solid var(--border); padding-top:12px;">
+          <div class="info-row player-name-row">
+            <span>
+              <span class="color-dot dot-white" style="display:inline-block;margin-right:4px;"></span>White
+            </span>
+            <span style="display:flex;align-items:center;gap:6px;">
+              <span id="infoWhitePlayer" style="font-weight:500;"></span>
+              <button id="addFriendWhite" class="add-friend-btn" title="Add friend" onclick="addFriendByUsername(document.getElementById('infoWhitePlayer').textContent)" style="display:none;">
+                <svg viewBox="0 0 20 20" fill="currentColor" width="13" height="13"><path d="M8 9a3 3 0 100-6 3 3 0 000 6zM8 11a6 6 0 016 6H2a6 6 0 016-6zM16 7a1 1 0 10-2 0v1h-1a1 1 0 100 2h1v1a1 1 0 102 0v-1h1a1 1 0 100-2h-1V7z"/></svg>
+              </button>
+            </span>
+          </div>
+          <div class="info-row player-name-row" style="margin-top:6px;">
+            <span>
+              <span class="color-dot dot-black" style="display:inline-block;margin-right:4px;"></span>Black
+            </span>
+            <span style="display:flex;align-items:center;gap:6px;">
+              <span id="infoBlackPlayer" style="font-weight:500;"></span>
+              <button id="addFriendBlack" class="add-friend-btn" title="Add friend" onclick="addFriendByUsername(document.getElementById('infoBlackPlayer').textContent)" style="display:none;">
+                <svg viewBox="0 0 20 20" fill="currentColor" width="13" height="13"><path d="M8 9a3 3 0 100-6 3 3 0 000 6zM8 11a6 6 0 016 6H2a6 6 0 016-6zM16 7a1 1 0 10-2 0v1h-1a1 1 0 100 2h1v1a1 1 0 102 0v-1h1a1 1 0 100-2h-1V7z"/></svg>
+              </button>
+            </span>
+          </div>
+        </div>
       </div>
 
     </aside>
@@ -234,6 +273,9 @@
             <p style="font-size: 0.7rem; color: var(--text-muted); text-align: center; margin-top: 8px;">
               Share this code with your friend
             </p>
+            <div id="waitingMsg" style="display:none; text-align:center; margin-top:10px; font-size:0.78rem; color:var(--green-bright);">
+              ⏳ Waiting for your friend to join…
+            </div>
           </div>
         </div>
 
@@ -258,6 +300,44 @@
 
       <div class="modal-actions" style="margin-top: 16px;">
         <button class="btn btn-ghost" onclick="closeModal('friendModal')">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ══════════════════════════════════════
+       FRIENDS MODAL
+  ══════════════════════════════════════ -->
+  <div class="modal-overlay" id="friendsModal" style="display:none;">
+    <div class="modal friends-modal">
+      <h2 class="modal-title">Friends</h2>
+
+      <!-- Pending requests -->
+      <div id="friendRequestsSection" style="display:none;">
+        <h3 class="friend-section-title" style="margin-bottom:8px;">
+          <svg viewBox="0 0 20 20" fill="currentColor" width="14" height="14" style="margin-right:4px;color:var(--warning);"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clip-rule="evenodd"/></svg>
+          Friend Requests
+        </h3>
+        <div id="friendRequestsList"></div>
+        <div style="border-top:1px solid var(--border); margin: 14px 0;"></div>
+      </div>
+
+      <!-- Friends list -->
+      <h3 class="friend-section-title" style="margin-bottom:8px;">Your Friends</h3>
+      <div id="friendsList" style="max-height:200px;overflow-y:auto;margin-bottom:16px;"></div>
+
+      <!-- Add friend -->
+      <div style="border-top:1px solid var(--border); padding-top:14px;">
+        <h3 class="friend-section-title" style="margin-bottom:8px;">Add a Friend</h3>
+        <div style="display:flex;gap:8px;">
+          <input type="text" id="addFriendInput" class="auth-input" placeholder="Enter username" maxlength="20" style="flex:1;" />
+          <button class="btn btn-primary" onclick="sendFriendRequest()" style="white-space:nowrap;">Send Request</button>
+        </div>
+        <div id="addFriendError" class="auth-error" style="display:none;margin-top:8px;"></div>
+        <div id="addFriendSuccess" style="display:none;margin-top:8px;font-size:0.8rem;color:var(--green-bright);"></div>
+      </div>
+
+      <div class="modal-actions" style="margin-top:16px;">
+        <button class="btn btn-ghost" onclick="closeModal('friendsModal')">Close</button>
       </div>
     </div>
   </div>

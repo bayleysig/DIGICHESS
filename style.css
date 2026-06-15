@@ -851,3 +851,143 @@ body {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* ══════════════════════════════════════════
+   PROFILE DROPDOWN
+══════════════════════════════════════════ */
+.account-widget {
+  position: relative;
+  display: flex;
+  align-items: center;
+  margin-left: 16px;
+}
+
+.account-trigger {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: var(--radius);
+  transition: background 0.15s;
+  color: var(--text-primary);
+}
+.account-trigger:hover { background: var(--bg-card-hover); }
+
+.dropdown-caret {
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+.profile-dropdown {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.4);
+  min-width: 160px;
+  z-index: 200;
+  overflow: hidden;
+}
+
+.dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  background: none;
+  border: none;
+  color: var(--text-primary);
+  font-family: 'Inter', sans-serif;
+  font-size: 0.875rem;
+  padding: 10px 14px;
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.12s;
+}
+.dropdown-item:hover { background: var(--bg-card-hover); }
+.dropdown-item-danger { color: var(--danger); }
+.dropdown-item-danger:hover { background: rgba(248,81,73,0.08); }
+
+.dropdown-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 2px 0;
+}
+
+/* ══════════════════════════════════════════
+   FRIENDS MODAL
+══════════════════════════════════════════ */
+.friends-modal {
+  width: 100%;
+  max-width: 420px;
+  padding: 24px 24px 20px;
+}
+
+.friend-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border-light);
+}
+.friend-row:last-child { border-bottom: none; }
+
+.friend-avatar {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--green-dark);
+  color: #fff;
+  font-size: 0.75rem;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-transform: uppercase;
+  flex-shrink: 0;
+}
+
+.friend-name {
+  flex: 1;
+  font-size: 0.9rem;
+  font-weight: 500;
+}
+
+.friends-empty {
+  font-size: 0.82rem;
+  color: var(--text-muted);
+  padding: 8px 0;
+}
+
+.btn-danger-ghost {
+  color: var(--danger) !important;
+  border-color: transparent;
+}
+.btn-danger-ghost:hover { background: rgba(248,81,73,0.1) !important; }
+
+/* ══════════════════════════════════════════
+   IN-GAME ADD FRIEND BUTTON
+══════════════════════════════════════════ */
+.add-friend-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--green-subtle);
+  border: 1px solid var(--green-dark);
+  color: var(--green-bright);
+  cursor: pointer;
+  padding: 0;
+  transition: background 0.15s;
+  flex-shrink: 0;
+}
+.add-friend-btn:hover { background: var(--green-glow); }
+
+.player-name-row { align-items: center; }

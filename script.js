@@ -106,6 +106,11 @@ let myColor         = null;        // 'w' or 'b' when playing with friend
 let currentUser     = null;        // Firebase Auth user object
 let currentUsername = null;        // display username
 
+// Friend game player names
+let opponentUsername = null;       // the other player's username in a friend game
+let hostUsername     = null;       // username of who created the game
+let joinerUsername   = null;       // username of who joined the game
+
 /* ══════════════════════════════════════════
    MULTIPLAYER HELPER FUNCTIONS (defined early)
 ══════════════════════════════════════════ */
@@ -128,6 +133,7 @@ function openFriendModal() {
   document.getElementById('joinError').style.display = 'none';
   document.getElementById('joinCodeDisplay').style.display = 'none';
   document.getElementById('friendJoinCode').value = '';
+  document.getElementById('waitingMsg') && (document.getElementById('waitingMsg').style.display = 'none');
 }
 
 /* ══════════════════════════════════════════
@@ -879,11 +885,34 @@ function updateCapturedPieces() {
 }
 
 function updateGameInfo() {
-  document.getElementById('infoMode').textContent   = gameMode === 'ai' ? 'vs AI' : 'PvP';
+  document.getElementById('infoMode').textContent   = gameMode === 'ai' ? 'vs AI' : gameMode === 'friend' ? 'Online' : 'PvP';
   document.getElementById('infoMoves').textContent  = moveHistory.length;
   if (!gameOver) {
     document.getElementById('infoStatus').textContent = 'Active';
     document.getElementById('infoStatus').className  = 'status-active';
+  }
+
+  // Player name rows in game info
+  const playerNamesSection = document.getElementById('playerNamesSection');
+  if (gameMode === 'friend' && hostUsername && joinerUsername) {
+    // joiner = white (bottom), host = black (top)
+    const whitePlayer = joinerUsername;
+    const blackPlayer = hostUsername;
+    const myName = currentUsername;
+    const oppName = myColor === 'w' ? blackPlayer : whitePlayer;
+
+    document.getElementById('infoWhitePlayer').textContent = whitePlayer;
+    document.getElementById('infoBlackPlayer').textContent = blackPlayer;
+
+    // Show add friend button next to opponent if not already friends
+    const addBtnWhite = document.getElementById('addFriendWhite');
+    const addBtnBlack = document.getElementById('addFriendBlack');
+    if (addBtnWhite) addBtnWhite.style.display = (whitePlayer !== myName) ? 'inline-flex' : 'none';
+    if (addBtnBlack) addBtnBlack.style.display = (blackPlayer !== myName) ? 'inline-flex' : 'none';
+
+    if (playerNamesSection) playerNamesSection.style.display = 'block';
+  } else {
+    if (playerNamesSection) playerNamesSection.style.display = 'none';
   }
 }
 
@@ -1158,18 +1187,18 @@ function switchAuthTab(tab) {
 }
 
 function updateAccountUI(username) {
-  const widget   = document.getElementById('accountWidget');
-  const avatar   = document.getElementById('accountAvatar');
-  const nameEl   = document.getElementById('accountUsername');
+  const widget    = document.getElementById('accountWidget');
+  const avatar    = document.getElementById('accountAvatar');
+  const nameEl    = document.getElementById('accountUsername');
   const signInBtn = document.getElementById('btnSignIn');
 
   if (username) {
     avatar.textContent  = username.charAt(0).toUpperCase();
     nameEl.textContent  = username;
-    widget.style.display   = 'flex';
+    widget.style.display    = 'flex';
     signInBtn.style.display = 'none';
   } else {
-    widget.style.display   = 'none';
+    widget.style.display    = 'none';
     signInBtn.style.display = 'inline-flex';
   }
 }
@@ -1284,6 +1313,174 @@ function friendlyAuthError(code) {
 }
 
 /* ══════════════════════════════════════════
+   FRIENDS SYSTEM
+══════════════════════════════════════════ */
+
+function openProfileDropdown() {
+  const dropdown = document.getElementById('profileDropdown');
+  if (!dropdown) return;
+  const isOpen = dropdown.style.display === 'block';
+  dropdown.style.display = isOpen ? 'none' : 'block';
+}
+
+// Close dropdown if clicking outside
+document.addEventListener('click', e => {
+  const widget = document.getElementById('accountWidget');
+  const dropdown = document.getElementById('profileDropdown');
+  if (dropdown && widget && !widget.contains(e.target)) {
+    dropdown.style.display = 'none';
+  }
+});
+
+function openFriendsModal() {
+  document.getElementById('profileDropdown').style.display = 'none';
+  document.getElementById('friendsModal').style.display = 'flex';
+  loadFriendsModal();
+}
+
+async function loadFriendsModal() {
+  if (!currentUser || !db) return;
+  const uid = currentUser.uid;
+
+  // Load friends list
+  const friendsSnap = await db.ref(`users/${uid}/friends`).once('value');
+  const friends = friendsSnap.val() || {};
+  const friendsList = document.getElementById('friendsList');
+  friendsList.innerHTML = '';
+  const friendUids = Object.keys(friends);
+  if (friendUids.length === 0) {
+    friendsList.innerHTML = '<p class="friends-empty">No friends yet. Add someone below!</p>';
+  } else {
+    for (const fuid of friendUids) {
+      const nameSnap = await db.ref(`users/${fuid}/username`).once('value');
+      const fname = nameSnap.val() || fuid;
+      const row = document.createElement('div');
+      row.className = 'friend-row';
+      row.innerHTML = `
+        <span class="friend-avatar">${fname.charAt(0).toUpperCase()}</span>
+        <span class="friend-name">${fname}</span>
+        <button class="btn btn-sm btn-ghost btn-danger-ghost" onclick="removeFriend('${fuid}','${fname}')">Remove</button>
+      `;
+      friendsList.appendChild(row);
+    }
+  }
+
+  // Load pending incoming requests
+  const reqSnap = await db.ref(`users/${uid}/friendRequests`).once('value');
+  const requests = reqSnap.val() || {};
+  const reqList  = document.getElementById('friendRequestsList');
+  reqList.innerHTML = '';
+  const reqUids = Object.keys(requests);
+  const reqSection = document.getElementById('friendRequestsSection');
+  reqSection.style.display = reqUids.length > 0 ? 'block' : 'none';
+
+  for (const ruid of reqUids) {
+    const nameSnap = await db.ref(`users/${ruid}/username`).once('value');
+    const rname = nameSnap.val() || ruid;
+    const row = document.createElement('div');
+    row.className = 'friend-row';
+    row.innerHTML = `
+      <span class="friend-avatar">${rname.charAt(0).toUpperCase()}</span>
+      <span class="friend-name">${rname}</span>
+      <button class="btn btn-sm btn-primary" onclick="acceptFriendRequest('${ruid}','${rname}')">Accept</button>
+      <button class="btn btn-sm btn-ghost" onclick="declineFriendRequest('${ruid}')">Decline</button>
+    `;
+    reqList.appendChild(row);
+  }
+
+  // Clear add friend field
+  document.getElementById('addFriendInput').value = '';
+  document.getElementById('addFriendError').style.display = 'none';
+  document.getElementById('addFriendSuccess').style.display = 'none';
+}
+
+async function sendFriendRequest() {
+  const input    = document.getElementById('addFriendInput');
+  const errorEl  = document.getElementById('addFriendError');
+  const successEl = document.getElementById('addFriendSuccess');
+  const targetUsername = input.value.trim().toLowerCase();
+
+  errorEl.style.display   = 'none';
+  successEl.style.display = 'none';
+
+  if (!targetUsername) {
+    errorEl.textContent = 'Enter a username.';
+    errorEl.style.display = 'block';
+    return;
+  }
+  if (targetUsername === currentUsername) {
+    errorEl.textContent = "You can't add yourself.";
+    errorEl.style.display = 'block';
+    return;
+  }
+
+  // Look up target UID
+  const snap = await db.ref(`usernames/${targetUsername}`).once('value');
+  if (!snap.exists()) {
+    errorEl.textContent = 'User not found.';
+    errorEl.style.display = 'block';
+    return;
+  }
+
+  const targetUid = snap.val();
+  const myUid     = currentUser.uid;
+
+  // Check not already friends
+  const alreadySnap = await db.ref(`users/${myUid}/friends/${targetUid}`).once('value');
+  if (alreadySnap.exists()) {
+    errorEl.textContent = 'Already friends!';
+    errorEl.style.display = 'block';
+    return;
+  }
+
+  // Send request (stored under target's incoming requests)
+  await db.ref(`users/${targetUid}/friendRequests/${myUid}`).set(true);
+
+  successEl.textContent  = `Friend request sent to ${targetUsername}!`;
+  successEl.style.display = 'block';
+  input.value = '';
+}
+
+async function acceptFriendRequest(fromUid, fromName) {
+  const myUid = currentUser.uid;
+  const updates = {};
+  // Add each other as friends
+  updates[`users/${myUid}/friends/${fromUid}`]   = true;
+  updates[`users/${fromUid}/friends/${myUid}`]   = true;
+  // Remove the request
+  updates[`users/${myUid}/friendRequests/${fromUid}`] = null;
+  await db.ref().update(updates);
+  loadFriendsModal(); // refresh
+}
+
+async function declineFriendRequest(fromUid) {
+  await db.ref(`users/${currentUser.uid}/friendRequests/${fromUid}`).remove();
+  loadFriendsModal();
+}
+
+async function removeFriend(fuid, fname) {
+  if (!confirm(`Remove ${fname} from your friends?`)) return;
+  const myUid = currentUser.uid;
+  const updates = {};
+  updates[`users/${myUid}/friends/${fuid}`]  = null;
+  updates[`users/${fuid}/friends/${myUid}`]  = null;
+  await db.ref().update(updates);
+  loadFriendsModal();
+}
+
+async function addFriendByUsername(username) {
+  // Quick-add from the in-game add button
+  if (!currentUser) { openAuthModal('signup'); return; }
+  const snap = await db.ref(`usernames/${username.toLowerCase()}`).once('value');
+  if (!snap.exists()) { alert('User not found.'); return; }
+  const targetUid = snap.val();
+  const alreadySnap = await db.ref(`users/${currentUser.uid}/friends/${targetUid}`).once('value');
+  if (alreadySnap.exists()) { alert('Already friends!'); return; }
+  await db.ref(`users/${targetUid}/friendRequests/${currentUser.uid}`).set(true);
+  alert(`Friend request sent to ${username}!`);
+}
+
+/* ══════════════════════════════════════════
    ADDITIONAL MULTIPLAYER FUNCTIONS
 ══════════════════════════════════════════ */
 
@@ -1302,139 +1499,134 @@ function boardFromFirebase(raw) {
 }
 
 function createFriendGame() {
-  console.log('createFriendGame called, db =', db);
-  
-  if (!db) {
-    alert('Firebase not initialized. Please refresh the page.');
-    return;
-  }
-  
-  playerId = generatePlayerId();
+  if (!db) { alert('Firebase not initialized. Please refresh the page.'); return; }
+  if (!currentUser) { openAuthModal('signup'); return; }
+
+  playerId = currentUser.uid;
   friendJoinCode = generateJoinCode();
-  myColor = 'w';
+  myColor = 'b';   // host plays black
   gameMode = 'friend';
-  
-  console.log('Creating game with code:', friendJoinCode);
-  
+  hostUsername = currentUsername;
+
   const gameData = {
-    players: { player1: playerId },
-    colors: { [playerId]: 'w' },
-    board: boardToFirebase(INITIAL_BOARD),
+    players:     { host: playerId },
+    usernames:   { host: currentUsername },
+    colors:      { [playerId]: 'b' },
+    board:       boardToFirebase(INITIAL_BOARD),
     currentTurn: 'w',
     moveHistory: [],
-    gameOver: false,
-    createdAt: firebase.database.ServerValue.TIMESTAMP
+    gameOver:    false,
+    createdAt:   firebase.database.ServerValue.TIMESTAMP
   };
-  
+
   db.ref(`games/${friendJoinCode}`).set(gameData).then(() => {
-    console.log('Game created successfully');
     document.getElementById('joinCodeBox').textContent = friendJoinCode;
     document.getElementById('joinCodeDisplay').style.display = 'block';
-    setupGameListener(friendJoinCode, false); // false = keep modal open until friend joins
+    const wMsg = document.getElementById('waitingMsg');
+    if (wMsg) wMsg.style.display = 'block';
+    setupGameListener(friendJoinCode, false);
   }).catch(err => {
-    console.error('Error creating game:', err);
     alert('Error creating game: ' + err.message);
   });
 }
 
 function joinFriendGame() {
-  if (!db) {
-    alert('Firebase not initialized. Please refresh the page.');
-    return;
-  }
-  
-  const code = document.getElementById('friendJoinCode').value.trim();
+  if (!db) { alert('Firebase not initialized. Please refresh the page.'); return; }
+  if (!currentUser) { openAuthModal('signup'); return; }
+
+  const code    = document.getElementById('friendJoinCode').value.trim();
   const errorEl = document.getElementById('joinError');
-  
+
   if (code.length !== 4 || !/^\d+$/.test(code)) {
     errorEl.textContent = 'Please enter a valid 4-digit code';
     errorEl.style.display = 'block';
     return;
   }
-  
+
   db.ref(`games/${code}`).once('value').then(snapshot => {
     if (!snapshot.exists()) {
       errorEl.textContent = 'Game not found. Check your code.';
       errorEl.style.display = 'block';
       return;
     }
-    
+
     const gameData = snapshot.val();
-    if (Object.keys(gameData.players).length >= 2) {
-      errorEl.textContent = 'Game is full. Can\'t join.';
+    if (gameData.players && Object.keys(gameData.players).length >= 2) {
+      errorEl.textContent = "Game is full. Can't join.";
       errorEl.style.display = 'block';
       return;
     }
-    
-    playerId = generatePlayerId();
+
+    playerId       = currentUser.uid;
     friendJoinCode = code;
-    myColor = 'b';
-    gameMode = 'friend';
-    
+    myColor        = 'w';   // joiner plays white (bottom of board)
+    gameMode       = 'friend';
+    joinerUsername = currentUsername;
+    hostUsername   = gameData.usernames ? gameData.usernames.host : 'Opponent';
+
     const updates = {};
-    updates[`games/${code}/players/player2`] = playerId;
-    updates[`games/${code}/colors/${playerId}`] = 'b';
-    
+    updates[`games/${code}/players/joiner`]          = playerId;
+    updates[`games/${code}/usernames/joiner`]        = currentUsername;
+    updates[`games/${code}/colors/${playerId}`]      = 'w';
+
     db.ref().update(updates).then(() => {
-      document.getElementById('friendModal').style.display = 'none';
-      setupGameListener(friendJoinCode, true); // true = close modal immediately for joiner
+      closeModal('friendModal');
+      setupGameListener(friendJoinCode, true);
     });
   });
 }
 
 function setupGameListener(code, closeOnStart) {
-  if (!db) {
-    console.error('Firebase not initialized');
-    return;
-  }
-  
+  if (!db) { console.error('Firebase not initialized'); return; }
+
   friendGameRef = db.ref(`games/${code}`);
-  
-  if (gameListener) {
-    friendGameRef.off('value', gameListener);
-  }
-  
+  if (gameListener) friendGameRef.off('value', gameListener);
+
   let gameStarted = false;
-  
+
   gameListener = friendGameRef.on('value', snapshot => {
     if (!snapshot.exists()) return;
-    
-    const gameData = snapshot.val();
+
+    const gameData    = snapshot.val();
     const playerCount = gameData.players ? Object.keys(gameData.players).length : 1;
 
-    // ── Game hasn't started yet (waiting for second player) ──
+    // Sync usernames whenever available
+    if (gameData.usernames) {
+      hostUsername   = gameData.usernames.host   || hostUsername;
+      joinerUsername = gameData.usernames.joiner || joinerUsername;
+      opponentUsername = myColor === 'w' ? hostUsername : joinerUsername;
+    }
+
+    // ── Waiting for second player ──
     if (!gameStarted) {
-      // Host stays in modal until friend joins
       if (!closeOnStart && playerCount < 2) return;
 
-      // Both players present — start the game
       gameStarted = true;
       closeModal('friendModal');
 
-      // Always start from a clean local board — don't trust Firebase board data
-      // for the initial render (avoids null/encoding issues)
+      // White (joiner) has board normal (isFlipped = true = white at bottom)
+      // Black (host)   has board flipped  (isFlipped = false = black at bottom)
+      isFlipped = (myColor === 'w');
+
       gameMode = 'friend';
-      initGame();
+      initGame();      // resets board state and renders
       updateGameInfo();
       return;
     }
 
-    // ── Game in progress — apply move synced from Firebase ──
-    // Only apply if it's the other player's update (not our own sync echoing back)
+    // ── In-progress: apply opponent's move ──
     const parsedBoard = boardFromFirebase(gameData.board);
-
-    // Validate: must be 8 rows of 8 columns
     if (!parsedBoard || parsedBoard.length !== 8 || parsedBoard.some(r => !r || r.length !== 8)) {
       console.error('Invalid board from Firebase:', parsedBoard);
       return;
     }
 
-    board = parsedBoard;
+    board       = parsedBoard;
     currentTurn = gameData.currentTurn;
     moveHistory = Array.isArray(gameData.moveHistory)
       ? gameData.moveHistory
       : Object.values(gameData.moveHistory || {});
-    gameOver = gameData.gameOver;
+    gameOver    = gameData.gameOver;
 
     renderBoard();
     renderMoveHistory();
@@ -1469,11 +1661,14 @@ function exitFriendGame() {
   if (gameListener && friendGameRef) {
     friendGameRef.off('value', gameListener);
   }
-  friendJoinCode = null;
-  playerId = null;
-  gameListener = null;
-  myColor = null;
-  gameMode = 'pvp';
+  friendJoinCode   = null;
+  playerId         = null;
+  gameListener     = null;
+  myColor          = null;
+  gameMode         = 'pvp';
+  hostUsername     = null;
+  joinerUsername   = null;
+  opponentUsername = null;
   newGame();
 }
 
