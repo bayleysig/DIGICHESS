@@ -2474,7 +2474,7 @@ function setupGameListener(code, closeOnStart) {
 
       // White (joiner) has board normal (isFlipped = true = white at bottom)
       // Black (host)   has board flipped  (isFlipped = false = black at bottom)
-      isFlipped = (myColor === 'w');
+      isFlipped = (myColor === 'b');
 
       gameMode = 'friend';
       initGame();      // resets board state and renders
@@ -2509,7 +2509,7 @@ function setupGameListener(code, closeOnStart) {
       const modalOpen = document.getElementById('gameOverModal').style.display !== 'none';
       if (modalOpen) {
         closeModal('gameOverModal');
-        isFlipped = (myColor === 'w');
+        isFlipped = (myColor === 'b');
         initGame();
         updateGameInfo();
         return;
@@ -2618,7 +2618,7 @@ function acceptRematch() {
   };
   friendGameRef.update(resetData).then(() => {
     closeModal('gameOverModal');
-    isFlipped = (myColor === 'w');
+    isFlipped = (myColor === 'b');
     initGame();
     updateGameInfo();
   });
