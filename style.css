@@ -1224,3 +1224,197 @@ body {
   background: #f8f9fa;
   box-shadow: 0 1px 6px rgba(0,0,0,0.2);
 }
+
+/* ══════════════════════════════════════════
+   CHAT — SHARED COMPONENTS
+══════════════════════════════════════════ */
+.chat-messages {
+  flex: 1;
+  overflow-y: auto;
+  max-height: 200px;
+  min-height: 80px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 0;
+  margin-bottom: 8px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+.chat-messages::-webkit-scrollbar { width: 4px; }
+.chat-messages::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+.chat-msg {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-width: 90%;
+  align-self: flex-start;
+}
+.chat-msg-own { align-self: flex-end; text-align: right; }
+
+.chat-msg-author {
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.chat-msg-text {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  border-bottom-left-radius: 3px;
+  padding: 6px 10px;
+  font-size: 0.82rem;
+  color: var(--text-primary);
+  line-height: 1.4;
+  word-break: break-word;
+}
+.chat-msg-own .chat-msg-text {
+  background: var(--green-subtle);
+  border-color: var(--green-dark);
+  border-bottom-right-radius: 3px;
+  border-bottom-left-radius: 10px;
+}
+
+.chat-input-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.chat-input {
+  flex: 1;
+  background: var(--bg-page);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-primary);
+  font-family: 'Inter', sans-serif;
+  font-size: 0.82rem;
+  padding: 7px 10px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+.chat-input:focus { border-color: var(--green); }
+.chat-input::placeholder { color: var(--text-muted); }
+
+.chat-send-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius);
+  background: var(--green);
+  border: none;
+  color: #fff;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: background 0.15s;
+}
+.chat-send-btn:hover { background: var(--green-bright); }
+
+.chat-online-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--green);
+  display: inline-block;
+}
+
+/* ══════════════════════════════════════════
+   MESSAGES MODAL (DMs)
+══════════════════════════════════════════ */
+.messages-modal {
+  width: 100%;
+  max-width: 420px;
+  padding: 24px;
+  min-height: 400px;
+  display: flex;
+  flex-direction: column;
+}
+
+.dm-thread-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 6px;
+  border-radius: var(--radius);
+  cursor: pointer;
+  transition: background 0.12s;
+  border-bottom: 1px solid var(--border-light);
+}
+.dm-thread-row:last-child { border-bottom: none; }
+.dm-thread-row:hover { background: var(--bg-card-hover); }
+
+.dm-thread-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow: hidden;
+}
+
+.dm-thread-name {
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.dm-thread-preview {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dm-thread-time {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+
+/* DM active chat view */
+#dmChatView {
+  flex-direction: column;
+  flex: 1;
+}
+
+.dm-chat-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.dm-chat-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+#dmChatMessages {
+  max-height: 300px;
+  flex: 1;
+}
+
+/* Unread badge */
+.unread-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--green);
+  color: #fff;
+  font-size: 0.6rem;
+  font-weight: 700;
+  min-width: 16px;
+  height: 16px;
+  border-radius: 8px;
+  padding: 0 4px;
+  margin-left: auto;
+}

@@ -45,6 +45,7 @@ function initFirebase() {
           updateAccountUI(displayName);
           startMatchRequestListener();
           startMatchAcceptedListener();
+          startDmNotifListener();
         });
       } else {
         stopMatchRequestListener();
@@ -1991,6 +1992,251 @@ function startMatchAcceptedListener() {
 }
 
 /* ══════════════════════════════════════════
+   IN-GAME CHAT
+══════════════════════════════════════════ */
+
+let inGameChatListener = null;
+
+function showInGameChat() {
+  document.getElementById('inGameChatCard').style.display = 'block';
+  loadInGameChat();
+}
+
+function hideInGameChat() {
+  document.getElementById('inGameChatCard').style.display = 'none';
+  if (inGameChatListener && friendGameRef) {
+    friendGameRef.child('chat').off('child_added', inGameChatListener);
+    inGameChatListener = null;
+  }
+}
+
+function loadInGameChat() {
+  if (!friendGameRef) return;
+  const msgEl = document.getElementById('inGameChatMessages');
+  msgEl.innerHTML = '';
+
+  if (inGameChatListener) {
+    friendGameRef.child('chat').off('child_added', inGameChatListener);
+  }
+
+  inGameChatListener = friendGameRef.child('chat').on('child_added', snap => {
+    const msg = snap.val();
+    if (!msg) return;
+    appendChatMessage(msgEl, msg.username, msg.text, msg.uid === currentUser?.uid);
+  });
+
+  // Enter to send
+  const input = document.getElementById('inGameChatInput');
+  input.onkeydown = e => { if (e.key === 'Enter') sendInGameMessage(); };
+}
+
+function appendChatMessage(container, username, text, isOwn) {
+  const div = document.createElement('div');
+  div.className = 'chat-msg' + (isOwn ? ' chat-msg-own' : '');
+  div.innerHTML = `
+    <span class="chat-msg-author">${isOwn ? 'You' : username}</span>
+    <span class="chat-msg-text">${escapeHtml(text)}</span>
+  `;
+  container.appendChild(div);
+  container.scrollTop = container.scrollHeight;
+}
+
+function sendInGameMessage() {
+  const input = document.getElementById('inGameChatInput');
+  const text  = input.value.trim();
+  if (!text || !friendGameRef || !currentUser) return;
+  input.value = '';
+  friendGameRef.child('chat').push({
+    uid:      currentUser.uid,
+    username: currentUsername,
+    text:     text,
+    sentAt:   firebase.database.ServerValue.TIMESTAMP
+  });
+}
+
+function escapeHtml(str) {
+  return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+/* ══════════════════════════════════════════
+   FRIEND DM CHAT
+══════════════════════════════════════════ */
+
+let activeDmUid      = null;  // UID of friend we're currently chatting with
+let activeDmListener = null;  // Firebase listener for active DM thread
+let dmUnreadCounts   = {};    // { uid: count }
+
+function dmChatId(uid1, uid2) {
+  return [uid1, uid2].sort().join('_');
+}
+
+function openMessagesModal() {
+  document.getElementById('profileDropdown').style.display = 'none';
+  document.getElementById('messagesModal').style.display = 'flex';
+  document.getElementById('dmConversationList').style.display = 'block';
+  document.getElementById('dmChatView').style.display = 'none';
+  // Clear unread counts
+  dmUnreadCounts = {};
+  updateUnreadBadge();
+  loadDmThreadList();
+}
+
+async function loadDmThreadList() {
+  if (!currentUser || !db) return;
+  const uid      = currentUser.uid;
+  const threadEl = document.getElementById('dmThreadList');
+  const noMsg    = document.getElementById('dmNoThreads');
+  threadEl.innerHTML = '';
+
+  // Get friends list to show threads for
+  const friendsSnap = await db.ref(`users/${uid}/friends`).once('value');
+  const friends = friendsSnap.val() || {};
+  const fUids   = Object.keys(friends);
+
+  if (fUids.length === 0) {
+    noMsg.style.display = 'block';
+    return;
+  }
+  noMsg.style.display = 'none';
+
+  const now = Date.now();
+  const oneDayAgo = now - 24 * 60 * 60 * 1000;
+
+  for (const fuid of fUids) {
+    const nameSnap = await db.ref(`users/${fuid}/username`).once('value');
+    const fname    = nameSnap.val() || fuid;
+    const chatId   = dmChatId(uid, fuid);
+
+    // Get last message preview
+    const lastSnap = await db.ref(`chats/${chatId}`)
+      .orderByChild('sentAt').limitToLast(1).once('value');
+    let preview = 'No messages yet';
+    let lastTime = '';
+    if (lastSnap.exists()) {
+      lastSnap.forEach(s => {
+        const v = s.val();
+        if (v.sentAt > oneDayAgo) {
+          preview = (v.uid === uid ? 'You: ' : '') + v.text.substring(0, 40) + (v.text.length > 40 ? '…' : '');
+          const d = new Date(v.sentAt);
+          lastTime = d.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
+        }
+      });
+    }
+
+    const row = document.createElement('div');
+    row.className = 'dm-thread-row';
+    row.innerHTML = `
+      <span class="friend-avatar">${fname.charAt(0).toUpperCase()}</span>
+      <div class="dm-thread-info">
+        <span class="dm-thread-name">${fname}</span>
+        <span class="dm-thread-preview">${preview}</span>
+      </div>
+      <span class="dm-thread-time">${lastTime}</span>
+    `;
+    row.onclick = () => openDmChat(fuid, fname);
+    threadEl.appendChild(row);
+  }
+}
+
+function openDmChat(fuid, fname) {
+  activeDmUid = fuid;
+  document.getElementById('dmConversationList').style.display = 'none';
+  document.getElementById('dmChatView').style.display        = 'flex';
+  document.getElementById('dmChatTitle').textContent         = fname;
+
+  const msgEl = document.getElementById('dmChatMessages');
+  msgEl.innerHTML = '';
+
+  if (activeDmListener) {
+    const oldChatId = dmChatId(currentUser.uid, activeDmUid);
+    db.ref(`chats/${oldChatId}`).off('child_added', activeDmListener);
+  }
+
+  const chatId    = dmChatId(currentUser.uid, fuid);
+  const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
+
+  activeDmListener = db.ref(`chats/${chatId}`)
+    .orderByChild('sentAt').startAt(oneDayAgo)
+    .on('child_added', snap => {
+      const msg = snap.val();
+      if (!msg) return;
+      appendChatMessage(msgEl, msg.username, msg.text, msg.uid === currentUser.uid);
+    });
+
+  const input = document.getElementById('dmChatInput');
+  input.onkeydown = e => { if (e.key === 'Enter') sendDmMessage(); };
+  input.focus();
+}
+
+function closeDmChat() {
+  if (activeDmListener && activeDmUid) {
+    const chatId = dmChatId(currentUser.uid, activeDmUid);
+    db.ref(`chats/${chatId}`).off('child_added', activeDmListener);
+    activeDmListener = null;
+  }
+  activeDmUid = null;
+  document.getElementById('dmConversationList').style.display = 'block';
+  document.getElementById('dmChatView').style.display         = 'none';
+  loadDmThreadList();
+}
+
+function sendDmMessage() {
+  const input = document.getElementById('dmChatInput');
+  const text  = input.value.trim();
+  if (!text || !activeDmUid || !currentUser) return;
+  input.value = '';
+
+  const chatId = dmChatId(currentUser.uid, activeDmUid);
+  db.ref(`chats/${chatId}`).push({
+    uid:      currentUser.uid,
+    username: currentUsername,
+    text:     text,
+    sentAt:   firebase.database.ServerValue.TIMESTAMP
+  });
+}
+
+// Start watching for new DMs to show unread badge
+let dmNotifListener = null;
+
+function startDmNotifListener() {
+  if (!currentUser || !db) return;
+  const uid = currentUser.uid;
+
+  db.ref(`users/${uid}/friends`).once('value').then(snap => {
+    const friends = snap.val() || {};
+    const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
+
+    Object.keys(friends).forEach(fuid => {
+      const chatId = dmChatId(uid, fuid);
+      db.ref(`chats/${chatId}`).orderByChild('sentAt').startAt(oneDayAgo)
+        .on('child_added', snap => {
+          const msg = snap.val();
+          if (!msg || msg.uid === uid) return;
+          // Only count if messages modal is closed or we're not in this thread
+          const modalOpen = document.getElementById('messagesModal').style.display !== 'none';
+          const inThread  = activeDmUid === fuid;
+          if (!modalOpen || !inThread) {
+            dmUnreadCounts[fuid] = (dmUnreadCounts[fuid] || 0) + 1;
+            updateUnreadBadge();
+          }
+        });
+    });
+  });
+}
+
+function updateUnreadBadge() {
+  const total  = Object.values(dmUnreadCounts).reduce((a, b) => a + b, 0);
+  const badge  = document.getElementById('unreadBadge');
+  if (!badge) return;
+  if (total > 0) {
+    badge.textContent    = total > 9 ? '9+' : total;
+    badge.style.display  = 'inline-flex';
+  } else {
+    badge.style.display  = 'none';
+  }
+}
+
+/* ══════════════════════════════════════════
    ADDITIONAL MULTIPLAYER FUNCTIONS
 ══════════════════════════════════════════ */
 
@@ -2121,6 +2367,7 @@ function setupGameListener(code, closeOnStart) {
       gameMode = 'friend';
       initGame();      // resets board state and renders
       updateGameInfo();
+      showInGameChat();
       return;
     }
 
@@ -2177,6 +2424,7 @@ function exitFriendGame() {
   if (gameListener && friendGameRef) {
     friendGameRef.off('value', gameListener);
   }
+  hideInGameChat();
   friendJoinCode   = null;
   playerId         = null;
   gameListener     = null;
