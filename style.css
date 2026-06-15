@@ -990,6 +990,14 @@ body {
 }
 .add-friend-btn:hover { background: var(--green-glow); }
 
+.already-friend-btn {
+  background: var(--green-subtle);
+  border-color: var(--green-bright);
+  color: var(--green-bright);
+  opacity: 0.9;
+}
+.already-friend-btn:hover { background: var(--green-glow); opacity: 1; }
+
 .player-name-row { align-items: center; }
 
 /* ══════════════════════════════════════════

@@ -966,20 +966,56 @@ function updateGameInfo() {
     const whitePlayer = joinerUsername;
     const blackPlayer = hostUsername;
     const myName = currentUsername;
-    const oppName = myColor === 'w' ? blackPlayer : whitePlayer;
 
     document.getElementById('infoWhitePlayer').textContent = whitePlayer;
     document.getElementById('infoBlackPlayer').textContent = blackPlayer;
 
-    // Show add friend button next to opponent if not already friends
-    const addBtnWhite = document.getElementById('addFriendWhite');
-    const addBtnBlack = document.getElementById('addFriendBlack');
-    if (addBtnWhite) addBtnWhite.style.display = (whitePlayer !== myName) ? 'inline-flex' : 'none';
-    if (addBtnBlack) addBtnBlack.style.display = (blackPlayer !== myName) ? 'inline-flex' : 'none';
+    // For each opponent slot, check friendship and show the right button
+    updatePlayerSlotButton('White', whitePlayer, myName);
+    updatePlayerSlotButton('Black', blackPlayer, myName);
 
     if (playerNamesSection) playerNamesSection.style.display = 'block';
   } else {
     if (playerNamesSection) playerNamesSection.style.display = 'none';
+  }
+}
+
+/**
+ * Shows the correct icon for a player slot:
+ *  - nothing if it's the current player
+ *  - green "already friends" icon (opens friends modal) if already friends
+ *  - green "add friend" icon if not yet friends
+ */
+async function updatePlayerSlotButton(color, playerName, myName) {
+  const addBtn     = document.getElementById(`addFriend${color}`);
+  const friendBtn  = document.getElementById(`alreadyFriend${color}`);
+  if (!addBtn || !friendBtn) return;
+
+  // Hide both to start
+  addBtn.style.display    = 'none';
+  friendBtn.style.display = 'none';
+
+  // Don't show anything next to our own name
+  if (playerName === myName) return;
+
+  if (!currentUser || !db) {
+    addBtn.style.display = 'inline-flex';
+    return;
+  }
+
+  // Look up the opponent's UID then check friends node
+  try {
+    const snap = await db.ref(`usernames/${playerName.toLowerCase()}`).once('value');
+    if (!snap.exists()) { addBtn.style.display = 'inline-flex'; return; }
+    const oppUid = snap.val();
+    const friendSnap = await db.ref(`users/${currentUser.uid}/friends/${oppUid}`).once('value');
+    if (friendSnap.exists()) {
+      friendBtn.style.display = 'inline-flex';
+    } else {
+      addBtn.style.display = 'inline-flex';
+    }
+  } catch (_) {
+    addBtn.style.display = 'inline-flex';
   }
 }
 
@@ -2474,7 +2510,7 @@ function setupGameListener(code, closeOnStart) {
 
       // White (joiner) has board normal (isFlipped = true = white at bottom)
       // Black (host)   has board flipped  (isFlipped = false = black at bottom)
-      isFlipped = (myColor === 'b');
+      isFlipped = (myColor === 'w');
 
       gameMode = 'friend';
       initGame();      // resets board state and renders
@@ -2509,7 +2545,7 @@ function setupGameListener(code, closeOnStart) {
       const modalOpen = document.getElementById('gameOverModal').style.display !== 'none';
       if (modalOpen) {
         closeModal('gameOverModal');
-        isFlipped = (myColor === 'b');
+        isFlipped = (myColor === 'w');
         initGame();
         updateGameInfo();
         return;
@@ -2618,7 +2654,7 @@ function acceptRematch() {
   };
   friendGameRef.update(resetData).then(() => {
     closeModal('gameOverModal');
-    isFlipped = (myColor === 'b');
+    isFlipped = (myColor === 'w');
     initGame();
     updateGameInfo();
   });
