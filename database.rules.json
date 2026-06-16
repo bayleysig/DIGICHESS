@@ -63,8 +63,9 @@
     },
     "chats": {
       "$chatId": {
-        ".read": "auth != null",
-        ".write": "auth != null"
+        ".read": "auth != null && root.child('users').child(auth.uid).child('isGuest').val() !== true",
+        ".write": "auth != null && root.child('users').child(auth.uid).child('isGuest').val() !== true",
+        ".indexOn": ["sentAt"]
       }
     },
     "friends": {

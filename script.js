@@ -9,6 +9,9 @@ let gameMode = "pvp"; // "pvp" | "ai" | "friend"
 
 /* ── FIREBASE CONFIG (will initialize after SDK loads) ── */
 let db = null;
+const DIGICHAT_THREAD_ID = '__digichat__';
+const DIGICHAT_CHAT_ID = 'DIGICHAT';
+const DIGICHAT_NAME = 'DIGICHAT';
 
 // Initialize Firebase when ready
 function initFirebase() {
@@ -30,8 +33,9 @@ function initFirebase() {
 
     // Set up auth state listener — fires immediately with current session
     firebase.auth().onAuthStateChanged(user => {
-      currentUser = user;
       if (user) {
+        currentUser = user;
+        if (user.isAnonymous) registerGuestCleanup(user.uid);
         // Logged in — fetch username from DB and update UI
         db.ref(`users/${user.uid}/username`).once('value').then(snap => {
           const username = snap.val();
@@ -54,7 +58,11 @@ function initFirebase() {
         });
       } else {
         stopMatchRequestListener();
+        stopDmNotifListener();
+        stopFriendRequestNotifListener();
+        stopActiveDmChatListener();
         currentUsername = null;
+        currentUser = null;
         updateAccountUI(null);
       }
     });
@@ -1548,6 +1556,7 @@ async function handleSignUp() {
   btn.textContent = 'Creating account…';
 
   try {
+    await firebase.auth().setPersistence(firebase.auth.Auth.Persistence.LOCAL);
     // Create Firebase Auth account using username@digichess.com as internal email
     // Auth enforces uniqueness, so this works even before database rules allow user reads.
     const email = `${username}@digichess.com`;
@@ -1586,6 +1595,7 @@ async function handleSignIn() {
   btn.textContent = 'Signing in…';
 
   try {
+    await firebase.auth().setPersistence(firebase.auth.Auth.Persistence.LOCAL);
     const email = `${username}@digichess.com`;
     await firebase.auth().signInWithEmailAndPassword(email, password);
     closeModal('authModal');
@@ -1599,6 +1609,7 @@ async function handleSignIn() {
 
 async function signInWithGoogle() {
   try {
+    await firebase.auth().setPersistence(firebase.auth.Auth.Persistence.LOCAL);
     const provider = new firebase.auth.GoogleAuthProvider();
     const cred     = await firebase.auth().signInWithPopup(provider);
     const user     = cred.user;
@@ -1671,6 +1682,7 @@ async function submitChosenUsername() {
 
 async function continueAsGuest() {
   try {
+    await firebase.auth().setPersistence(firebase.auth.Auth.Persistence.SESSION);
     // Sign in anonymously — Firebase creates a temporary account
     const cred = await firebase.auth().signInAnonymously();
     const uid  = cred.user.uid;
@@ -1682,14 +1694,25 @@ async function continueAsGuest() {
     // Store temporarily in DB so game rooms can reference it
     await db.ref(`users/${uid}/username`).set(guestName);
     await db.ref(`users/${uid}/isGuest`).set(true);
+    registerGuestCleanup(uid);
 
     closeModal('authModal');
 
     // Register cleanup on tab/window close
     window.addEventListener('beforeunload', deleteGuestAccount);
+    window.addEventListener('pagehide', deleteGuestAccount);
   } catch (err) {
     console.error('Guest sign in error:', err);
   }
+}
+
+function registerGuestCleanup(uid) {
+  if (!db || !uid) return;
+  db.ref('.info/connected').on('value', snap => {
+    if (!snap.val()) return;
+    db.ref(`users/${uid}`).onDisconnect().remove();
+    db.ref(`matchmaking/${uid}`).onDisconnect().remove();
+  });
 }
 
 async function deleteGuestAccount() {
@@ -1707,6 +1730,10 @@ async function deleteGuestAccount() {
 }
 
 function signOutUser() {
+  if (currentUser && currentUser.isAnonymous) {
+    deleteGuestAccount().catch(err => console.error('Guest sign out cleanup error:', err));
+    return;
+  }
   firebase.auth().signOut().catch(err => console.error('Sign out error:', err));
 }
 
@@ -2675,10 +2702,27 @@ function escapeHtml(str) {
 
 let activeDmUid      = null;  // UID of friend we're currently chatting with
 let activeDmListener = null;  // Firebase listener for active DM thread
+let activeDmChatId   = null;
 let dmUnreadCounts   = {};    // { uid: count }
+let dmNotifRefs      = [];
+let friendRequestNotifRef = null;
+let friendRequestNotifHandler = null;
 
 function dmChatId(uid1, uid2) {
+  if (uid1 === DIGICHAT_THREAD_ID || uid2 === DIGICHAT_THREAD_ID) return DIGICHAT_CHAT_ID;
   return [uid1, uid2].sort().join('_');
+}
+
+function isDigichatThread(threadId) {
+  return threadId === DIGICHAT_THREAD_ID;
+}
+
+function getThreadChatId(threadId) {
+  return isDigichatThread(threadId) ? DIGICHAT_CHAT_ID : dmChatId(currentUser.uid, threadId);
+}
+
+function getThreadAvatar(name, isGlobal = false) {
+  return isGlobal ? 'D' : sanitizePlayerName(name, 'Player').charAt(0).toUpperCase();
 }
 
 function openMessagesModal() {
@@ -2698,6 +2742,14 @@ async function loadDmThreadList() {
   const threadEl = document.getElementById('dmThreadList');
   const noMsg    = document.getElementById('dmNoThreads');
   threadEl.innerHTML = '';
+  noMsg.style.display = 'none';
+
+  await appendDmThreadRow({
+    threadId: DIGICHAT_THREAD_ID,
+    name: DIGICHAT_NAME,
+    chatId: DIGICHAT_CHAT_ID,
+    isGlobal: true
+  });
 
   // Get friends list to show threads for
   const friendsSnap = await db.ref(`users/${uid}/friends`).once('value');
@@ -2705,52 +2757,69 @@ async function loadDmThreadList() {
   const fUids   = Object.keys(friends);
 
   if (fUids.length === 0) {
-    noMsg.style.display = 'block';
     return;
   }
-  noMsg.style.display = 'none';
+  await appendFriendDmRows(fUids, friends);
+}
 
+async function appendDmThreadRow({ threadId, name, chatId, isGlobal = false }) {
+  const threadEl = document.getElementById('dmThreadList');
+  const uid = currentUser.uid;
   const now = Date.now();
   const oneDayAgo = now - 24 * 60 * 60 * 1000;
 
+  const lastSnap = await db.ref(`chats/${chatId}`)
+    .orderByChild('sentAt').limitToLast(1).once('value');
+  let preview = isGlobal ? 'Everyone with an account is here' : 'No messages yet';
+  let lastTime = '';
+  if (lastSnap.exists()) {
+    lastSnap.forEach(s => {
+      const v = s.val();
+      if (v.sentAt > oneDayAgo) {
+        const sender = v.uid === uid ? 'You' : sanitizePlayerName(v.username, 'Player');
+        preview = `${sender}: ${String(v.text || '').substring(0, 40)}${String(v.text || '').length > 40 ? '...' : ''}`;
+        const d = new Date(v.sentAt);
+        lastTime = d.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
+      }
+    });
+  }
+
+  const row = document.createElement('div');
+  row.className = `dm-thread-row${isGlobal ? ' dm-thread-digichat' : ''}`;
+  row.innerHTML = `
+    <span class="friend-avatar">${getThreadAvatar(name, isGlobal)}</span>
+    <div class="dm-thread-info">
+      <span class="dm-thread-name">${escapeHtml(name)}</span>
+      <span class="dm-thread-preview">${escapeHtml(preview)}</span>
+    </div>
+    <span class="dm-thread-time">${lastTime}</span>
+  `;
+  row.onclick = () => openDmChat(threadId, name);
+  threadEl.appendChild(row);
+}
+
+async function appendFriendDmRows(fUids, friends) {
   for (const fuid of fUids) {
-    const nameSnap = await db.ref(`users/${fuid}/username`).once('value');
-    const fname    = nameSnap.val() || fuid;
-    const chatId   = dmChatId(uid, fuid);
-
-    // Get last message preview
-    const lastSnap = await db.ref(`chats/${chatId}`)
-      .orderByChild('sentAt').limitToLast(1).once('value');
-    let preview = 'No messages yet';
-    let lastTime = '';
-    if (lastSnap.exists()) {
-      lastSnap.forEach(s => {
-        const v = s.val();
-        if (v.sentAt > oneDayAgo) {
-          preview = (v.uid === uid ? 'You: ' : '') + v.text.substring(0, 40) + (v.text.length > 40 ? '…' : '');
-          const d = new Date(v.sentAt);
-          lastTime = d.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
-        }
-      });
-    }
-
-    const row = document.createElement('div');
-    row.className = 'dm-thread-row';
-    row.innerHTML = `
-      <span class="friend-avatar">${fname.charAt(0).toUpperCase()}</span>
-      <div class="dm-thread-info">
-        <span class="dm-thread-name">${fname}</span>
-        <span class="dm-thread-preview">${preview}</span>
-      </div>
-      <span class="dm-thread-time">${lastTime}</span>
-    `;
-    row.onclick = () => openDmChat(fuid, fname);
-    threadEl.appendChild(row);
+    const fname = await resolveFriendDisplayName(fuid, friends[fuid]);
+    await appendDmThreadRow({
+      threadId: fuid,
+      name: fname,
+      chatId: dmChatId(currentUser.uid, fuid)
+    });
   }
 }
 
 function openDmChat(fuid, fname) {
+  if (!currentUser || !db) return;
+  if (activeDmListener && activeDmChatId) {
+    db.ref(`chats/${activeDmChatId}`).off('child_added', activeDmListener);
+    activeDmListener = null;
+  }
+
   activeDmUid = fuid;
+  activeDmChatId = getThreadChatId(fuid);
+  dmUnreadCounts[fuid] = 0;
+  updateUnreadBadge();
   document.getElementById('dmConversationList').style.display = 'none';
   document.getElementById('dmChatView').style.display        = 'flex';
   document.getElementById('dmChatTitle').textContent         = fname;
@@ -2758,15 +2827,9 @@ function openDmChat(fuid, fname) {
   const msgEl = document.getElementById('dmChatMessages');
   msgEl.innerHTML = '';
 
-  if (activeDmListener) {
-    const oldChatId = dmChatId(currentUser.uid, activeDmUid);
-    db.ref(`chats/${oldChatId}`).off('child_added', activeDmListener);
-  }
-
-  const chatId    = dmChatId(currentUser.uid, fuid);
   const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
 
-  activeDmListener = db.ref(`chats/${chatId}`)
+  activeDmListener = db.ref(`chats/${activeDmChatId}`)
     .orderByChild('sentAt').startAt(oneDayAgo)
     .on('child_added', snap => {
       const msg = snap.val();
@@ -2780,15 +2843,19 @@ function openDmChat(fuid, fname) {
 }
 
 function closeDmChat() {
-  if (activeDmListener && activeDmUid) {
-    const chatId = dmChatId(currentUser.uid, activeDmUid);
-    db.ref(`chats/${chatId}`).off('child_added', activeDmListener);
-    activeDmListener = null;
-  }
-  activeDmUid = null;
+  stopActiveDmChatListener();
   document.getElementById('dmConversationList').style.display = 'block';
   document.getElementById('dmChatView').style.display         = 'none';
   loadDmThreadList();
+}
+
+function stopActiveDmChatListener() {
+  if (activeDmListener && activeDmChatId && db) {
+    db.ref(`chats/${activeDmChatId}`).off('child_added', activeDmListener);
+  }
+  activeDmListener = null;
+  activeDmUid = null;
+  activeDmChatId = null;
 }
 
 function sendDmMessage() {
@@ -2797,7 +2864,7 @@ function sendDmMessage() {
   if (!text || !activeDmUid || !currentUser) return;
   input.value = '';
 
-  const chatId = dmChatId(currentUser.uid, activeDmUid);
+  const chatId = getThreadChatId(activeDmUid);
   db.ref(`chats/${chatId}`).push({
     uid:      currentUser.uid,
     username: currentUsername,
@@ -2806,56 +2873,75 @@ function sendDmMessage() {
   });
 }
 
-// Start watching for new DMs to show unread badge
-let dmNotifListener = null;
-
 function startDmNotifListener() {
   if (!currentUser || !db) return;
   const uid = currentUser.uid;
+  stopDmNotifListener();
+
+  watchMessageThread({
+    threadId: DIGICHAT_THREAD_ID,
+    chatId: DIGICHAT_CHAT_ID,
+    name: DIGICHAT_NAME,
+    isGlobal: true
+  });
 
   db.ref(`users/${uid}/friends`).once('value').then(snap => {
     const friends = snap.val() || {};
 
     Object.keys(friends).forEach(fuid => {
-      const chatId    = dmChatId(uid, fuid);
-      // Track when listener starts so we ignore historical messages on replay
-      const listenStart = Date.now();
-      let initialLoadDone = false;
-
-      // Get the last message key so we can skip everything before it
-      db.ref(`chats/${chatId}`).orderByChild('sentAt').limitToLast(1)
-        .once('value').then(lastSnap => {
-          // Now attach a real-time listener starting after existing messages
-          db.ref(`chats/${chatId}`).orderByChild('sentAt').startAt(listenStart)
-            .on('child_added', msgSnap => {
-              const msg = msgSnap.val();
-              if (!msg || msg.uid === uid) return;
-              const modalOpen = document.getElementById('messagesModal').style.display !== 'none';
-              const inThread  = activeDmUid === fuid;
-              if (!modalOpen || !inThread) {
-                dmUnreadCounts[fuid] = (dmUnreadCounts[fuid] || 0) + 1;
-                updateUnreadBadge();
-                pushNotif({
-                  type:        'message',
-                  icon:        '💬',
-                  title:       `New message from <strong>${msg.username}</strong>`,
-                  body:        msg.text.substring(0, 60) + (msg.text.length > 60 ? '…' : ''),
-                  actions:     [{ label: 'Open', cls: 'btn-primary', onclick: `openMessagesModal(); openDmChat('${fuid}','${msg.username}')` }],
-                  autoDismiss: NOTIF_AUTO_DISMISS_MS
-                });
-              }
-            });
-        });
+      const friendName = typeof friends[fuid] === 'object' && friends[fuid]?.username ? friends[fuid].username : 'Friend';
+      watchMessageThread({
+        threadId: fuid,
+        chatId: dmChatId(uid, fuid),
+        name: sanitizePlayerName(friendName, 'Friend')
+      });
     });
   });
+}
+
+function watchMessageThread({ threadId, chatId, name, isGlobal = false }) {
+  const uid = currentUser.uid;
+  const listenStart = Date.now();
+  const query = db.ref(`chats/${chatId}`).orderByChild('sentAt').startAt(listenStart);
+  const handler = query.on('child_added', msgSnap => {
+    const msg = msgSnap.val();
+    if (!msg || msg.uid === uid) return;
+    const modalOpen = document.getElementById('messagesModal').style.display !== 'none';
+    const inThread  = activeDmUid === threadId;
+    if (modalOpen && inThread) return;
+
+    dmUnreadCounts[threadId] = (dmUnreadCounts[threadId] || 0) + 1;
+    updateUnreadBadge();
+    const sender = sanitizePlayerName(msg.username, 'Player');
+    const title = isGlobal
+      ? `New message in <strong>${DIGICHAT_NAME}</strong>`
+      : `New message from <strong>${sender}</strong>`;
+    const openName = isGlobal ? DIGICHAT_NAME : sender;
+    pushNotif({
+      type:        'message',
+      icon:        '💬',
+      title,
+      body:        String(msg.text || '').substring(0, 60) + (String(msg.text || '').length > 60 ? '...' : ''),
+      actions:     [{ label: 'Open', cls: 'btn-primary', onclick: `openMessagesModal(); openDmChat('${threadId}','${openName}')` }],
+      autoDismiss: NOTIF_AUTO_DISMISS_MS
+    });
+  });
+  dmNotifRefs.push({ query, handler });
+}
+
+function stopDmNotifListener() {
+  dmNotifRefs.forEach(({ query, handler }) => query.off('child_added', handler));
+  dmNotifRefs = [];
 }
 
 // Also notify on incoming friend requests
 function startFriendRequestNotifListener() {
   if (!currentUser || !db) return;
   const uid = currentUser.uid;
+  stopFriendRequestNotifListener();
 
-  db.ref(`users/${uid}/friendRequests`).on('child_added', snap => {
+  friendRequestNotifRef = db.ref(`users/${uid}/friendRequests`);
+  friendRequestNotifHandler = friendRequestNotifRef.on('child_added', snap => {
     if (!snap.exists()) return;
     const reqData = snap.val();
     const fromUid = snap.key;
@@ -2885,6 +2971,14 @@ function startFriendRequestNotifListener() {
       });
     });
   });
+}
+
+function stopFriendRequestNotifListener() {
+  if (friendRequestNotifRef && friendRequestNotifHandler) {
+    friendRequestNotifRef.off('child_added', friendRequestNotifHandler);
+  }
+  friendRequestNotifRef = null;
+  friendRequestNotifHandler = null;
 }
 
 function updateUnreadBadge() {

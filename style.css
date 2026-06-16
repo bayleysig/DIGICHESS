@@ -1494,6 +1494,16 @@ body.online-timer-locked .timer-controls {
 .dm-thread-row:last-child { border-bottom: none; }
 .dm-thread-row:hover { background: var(--bg-card-hover); }
 
+.dm-thread-digichat {
+  background: rgba(52, 168, 83, 0.08);
+  border: 1px solid rgba(52, 168, 83, 0.22);
+  margin-bottom: 8px;
+}
+
+.dm-thread-digichat:hover {
+  background: rgba(52, 168, 83, 0.12);
+}
+
 .dm-thread-info {
   flex: 1;
   display: flex;
