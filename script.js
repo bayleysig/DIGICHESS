@@ -3372,16 +3372,8 @@ async function loadLeaderboard() {
     const rows = await loadAllAccountLeaderboardRows();
     rows.sort((a, b) => (Number(b[category]) || 0) - (Number(a[category]) || 0));
 
-    const filtered = category === 'winRate'
-      ? rows.filter(row => (Number(row.wins) || 0) + (Number(row.losses) || 0) > 0)
-      : rows;
-
-    if (filtered.length === 0) {
-      list.innerHTML = '<p class="friends-empty">No leaderboard data yet.</p>';
-      return;
-    }
-
-    list.innerHTML = filtered.slice(0, 5).map((row, idx) => {
+    const topRows = fillLeaderboardRows(rows, 5);
+    list.innerHTML = topRows.map((row, idx) => {
       const value = category === 'winRate'
         ? `${Number(row.winRate || 0).toFixed(1)}%`
         : `${Number(row[category]) || 0} ${labels[category]}`;
@@ -3397,6 +3389,21 @@ async function loadLeaderboard() {
     console.error('Leaderboard load failed:', err);
     list.innerHTML = '<p class="friends-empty">Unable to load leaderboards right now.</p>';
   }
+}
+
+function fillLeaderboardRows(rows, count) {
+  const filled = rows.slice(0, count);
+  while (filled.length < count) {
+    filled.push({
+      uid: `placeholder_${filled.length + 1}`,
+      username: 'Player',
+      wins: 0,
+      losses: 0,
+      winRate: 0,
+      onlineMatches: 0
+    });
+  }
+  return filled;
 }
 
 async function loadAllAccountLeaderboardRows() {
