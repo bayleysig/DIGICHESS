@@ -2652,6 +2652,17 @@ function findMatch() {
       joinerUsername   = sanitizePlayerName(names.joiner, currentUsername || 'Player');
       opponentUsername = myColor === 'w' ? hostUsername : joinerUsername;
 
+      // Register this player's slot in Firebase so security rules allow their moves.
+      // The creator already wrote host; the joiner (non-creator) must write joiner slot.
+      const mySlotInGame = gameData.players?.host === uid ? 'host' : 'joiner';
+      if (mySlotInGame === 'joiner' && !gameData.players?.joiner) {
+        const slotUpdates = {};
+        slotUpdates[`games/${code}/players/joiner`]     = uid;
+        slotUpdates[`games/${code}/usernames/joiner`]   = sanitizePlayerName(currentUsername || 'Player');
+        slotUpdates[`games/${code}/colors/${uid}`]      = myColor;
+        await db.ref().update(slotUpdates);
+      }
+
       document.getElementById('matchmakingText').textContent = 'Found opponent! Loading…';
       document.getElementById('friendModal').style.display   = 'none';
       setupGameListener(code, true);
