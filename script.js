@@ -2646,6 +2646,15 @@ let quickPlayGameListener  = null;
 let matchmakingPairsRef    = null;
 let matchmakingPairsListener = null;
 const QP_TIME_SECS         = 600;
+const QP_QUEUE_MAX_AGE_MS  = 2 * 60 * 1000;
+
+function isFreshMatchmakingEntry(entry, now = Date.now()) {
+  if (!entry) return false;
+  const joinedAt = Number(entry.joinedAtMs || entry.joinedAt || 0);
+  return Number.isFinite(joinedAt) &&
+         joinedAt >= now - QP_QUEUE_MAX_AGE_MS &&
+         joinedAt <= now + 15000;
+}
 
 function findMatch() {
   if (!currentUser) { openAuthModal('signup'); return; }
@@ -2665,11 +2674,20 @@ function findMatch() {
         return name;
       });
 
-  ensureUsername.then(myUsername => {
+  ensureUsername.then(async myUsername => {
     const myRef     = db.ref(`matchmaking/${uid}`);
     const myPairRef = db.ref(`matchmakingPairs/${uid}`);
-    myPairRef.remove().catch(() => {});
-    myRef.set({ username: myUsername, joinedAt: firebase.database.ServerValue.TIMESTAMP });
+    const searchStartedAt = Date.now();
+    const sessionId = `${uid}_${searchStartedAt}_${Math.random().toString(36).slice(2, 8)}`;
+
+    await myPairRef.remove().catch(() => {});
+    await myRef.remove().catch(() => {});
+    await myRef.set({
+      username: myUsername,
+      joinedAt: firebase.database.ServerValue.TIMESTAMP,
+      joinedAtMs: searchStartedAt,
+      sessionId
+    });
     myRef.onDisconnect().remove();
     myPairRef.onDisconnect().remove();
     matchmakingPairsRef = myPairRef;
@@ -2739,13 +2757,16 @@ function findMatch() {
       // Save opponent data NOW before the transaction wipes it
       const opponentData = snap.val() || {};
       const opponentName = opponentData.username || null;
+      if (!isFreshMatchmakingEntry(opponentData)) return;
 
       paired = true; // claim synchronously before any await
 
       let result;
       try {
+        const claimStartedAt = Date.now();
         result = await db.ref(`matchmaking/${opponentUid}`).transaction(current => {
           if (current === null) return; // already gone
+          if (!isFreshMatchmakingEntry(current, claimStartedAt)) return;
           return null;                  // claim it
         });
       } catch (e) { paired = false; return; }
