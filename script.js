@@ -164,6 +164,7 @@ function openPlayOnlineModal() {
     openAuthModal('signup');
     return;
   }
+  updatePrimaryNavState('friend');
   const modal = document.getElementById('friendModal');
   modal.style.display = 'flex';
   // Reset state on open
@@ -182,6 +183,43 @@ function openPlayOnlineModal() {
 
 // Keep old name working (used internally by acceptMatchRequest flow)
 function openFriendModal() { openPlayOnlineModal(); }
+
+function showHomePage() {
+  const home = document.getElementById('homePage');
+  const game = document.getElementById('gameLayout');
+  if (home) home.style.display = 'block';
+  if (game) game.style.display = 'none';
+  updatePrimaryNavState('home');
+  loadHomepageLeaderboardPreview();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function showGamePage() {
+  const home = document.getElementById('homePage');
+  const game = document.getElementById('gameLayout');
+  if (home) home.style.display = 'none';
+  if (game) game.style.display = 'grid';
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function updatePrimaryNavState(active) {
+  document.getElementById('btnHome')?.classList.toggle('active', active === 'home');
+  document.getElementById('btnPVP')?.classList.toggle('active', active === 'pvp');
+  document.getElementById('btnFriend')?.classList.toggle('active', active === 'friend');
+  document.getElementById('btnAI')?.classList.toggle('active', active === 'ai');
+}
+
+function startLocalGameFromHome() {
+  setGameMode('pvp');
+}
+
+function requireAccountThen(action) {
+  if (!currentUser || currentUser.isAnonymous) {
+    openAuthModal('signup');
+    return;
+  }
+  action();
+}
 
 /* ══════════════════════════════════════════
    INITIALIZATION
@@ -1295,6 +1333,8 @@ function setGameMode(mode) {
   if (mode === 'ai') {
     const banner = document.getElementById('aiBanner');
     banner.style.display = 'flex';
+    showGamePage();
+    updatePrimaryNavState('ai');
     return;
   }
   
@@ -1303,8 +1343,8 @@ function setGameMode(mode) {
   }
   
   gameMode = mode;
-  document.getElementById('btnPVP').classList.toggle('active', mode === 'pvp');
-  document.getElementById('btnAI').classList.toggle('active',  mode === 'ai');
+  showGamePage();
+  updatePrimaryNavState(mode);
   updateGameInfo();
   newGame();
 }
@@ -3564,6 +3604,26 @@ async function loadLeaderboard() {
   }
 }
 
+async function loadHomepageLeaderboardPreview() {
+  const list = document.getElementById('homeLeaderboardPreview');
+  if (!list || !db) return;
+
+  try {
+    const rows = await loadAllAccountLeaderboardRows();
+    rows.sort((a, b) => (Number(b.wins) || 0) - (Number(a.wins) || 0));
+    const topRows = fillLeaderboardRows(rows, 3);
+    list.innerHTML = topRows.map((row, idx) => `
+      <div class="leaderboard-row">
+        <span class="leaderboard-rank">#${idx + 1}</span>
+        <span class="leaderboard-name">${sanitizePlayerName(row.username, 'Player')}</span>
+        <span class="leaderboard-value">${Number(row.wins) || 0} wins</span>
+      </div>
+    `).join('');
+  } catch (err) {
+    console.warn('Homepage leaderboard preview failed:', err);
+  }
+}
+
 function fillLeaderboardRows(rows, count) {
   const filled = rows.slice(0, count);
   while (filled.length < count) {
@@ -4022,6 +4082,7 @@ function initFirebaseWithRetry(attempts = 0) {
   if (typeof firebase !== 'undefined' && firebase.apps) {
     initFirebase();
     console.log('Firebase initialized successfully');
+    loadHomepageLeaderboardPreview();
   } else if (attempts < 10) {
     setTimeout(() => initFirebaseWithRetry(attempts + 1), 500);
   } else {

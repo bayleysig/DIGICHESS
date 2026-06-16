@@ -29,7 +29,11 @@
       <span class="logo-text">DigiChess<span class="logo-dot">.com</span></span>
     </div>
     <nav class="site-nav">
-      <button class="nav-btn active" id="btnPVP" onclick="setGameMode('pvp')">
+      <button class="nav-btn active" id="btnHome" onclick="showHomePage()">
+        <svg viewBox="0 0 20 20" fill="currentColor" width="16" height="16"><path d="M10.707 2.293a1 1 0 00-1.414 0l-7 7A1 1 0 003 11h1v5a2 2 0 002 2h3v-5h2v5h3a2 2 0 002-2v-5h1a1 1 0 00.707-1.707l-7-7z"/></svg>
+        Home
+      </button>
+      <button class="nav-btn" id="btnPVP" onclick="setGameMode('pvp')">
         <svg viewBox="0 0 20 20" fill="currentColor" width="16" height="16"><path d="M9 6a3 3 0 11-6 0 3 3 0 016 0zM17 6a3 3 0 11-6 0 3 3 0 016 0zM12.93 17c.046-.327.07-.66.07-1a6.97 6.97 0 00-1.5-4.33A5 5 0 0119 16v1h-6.07zM6 11a5 5 0 015 5v1H1v-1a5 5 0 015-5z"/></svg>
         Play Locally
       </button>
@@ -93,9 +97,157 @@
   </div>
 
   <!-- ══════════════════════════════════════
+       HOMEPAGE
+  ══════════════════════════════════════ -->
+  <main class="home-page" id="homePage">
+    <section class="home-hero">
+      <div class="home-hero-copy">
+        <span class="home-kicker">Modern online chess for every match</span>
+        <h1>Play sharper chess with friends, rankings and real match history.</h1>
+        <p class="home-hero-sub">
+          DigiChess brings fast online games, private friend matches, profiles, statistics,
+          leaderboards and chat into one polished chess platform.
+        </p>
+        <div class="home-hero-actions">
+          <button class="btn btn-primary home-cta" onclick="openPlayOnlineModal()">
+            Play Online
+          </button>
+          <button class="btn btn-ghost home-cta" onclick="startLocalGameFromHome()">
+            Open Board
+          </button>
+        </div>
+        <div class="home-trust-row">
+          <span><strong>10 min</strong> synced timers</span>
+          <span><strong>Top 5</strong> leaderboards</span>
+          <span><strong>Live</strong> player chat</span>
+        </div>
+      </div>
+
+      <div class="home-hero-visual" aria-hidden="true">
+        <div class="home-board-shell">
+          <div class="home-board">
+            <span class="home-square light">♜</span><span class="home-square dark">♞</span><span class="home-square light"></span><span class="home-square dark">♛</span><span class="home-square light">♚</span><span class="home-square dark"></span>
+            <span class="home-square dark">♟</span><span class="home-square light"></span><span class="home-square dark">♟</span><span class="home-square light"></span><span class="home-square dark">♟</span><span class="home-square light">♟</span>
+            <span class="home-square light"></span><span class="home-square dark"></span><span class="home-square light">♝</span><span class="home-square dark"></span><span class="home-square light"></span><span class="home-square dark"></span>
+            <span class="home-square dark"></span><span class="home-square light">♙</span><span class="home-square dark"></span><span class="home-square light">♘</span><span class="home-square dark"></span><span class="home-square light"></span>
+            <span class="home-square light">♙</span><span class="home-square dark"></span><span class="home-square light">♙</span><span class="home-square dark"></span><span class="home-square light">♗</span><span class="home-square dark">♙</span>
+            <span class="home-square dark">♖</span><span class="home-square light"></span><span class="home-square dark">♔</span><span class="home-square light">♕</span><span class="home-square dark"></span><span class="home-square light">♖</span>
+          </div>
+          <div class="home-live-card home-live-card-top">
+            <span class="home-live-label">Online Match</span>
+            <strong>White to move</strong>
+          </div>
+          <div class="home-live-card home-live-card-bottom">
+            <span class="home-live-label">Rapid</span>
+            <strong>08:42 vs 09:15</strong>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="home-section">
+      <div class="home-section-head">
+        <span class="home-kicker">Core platform</span>
+        <h2>Everything your chess club needs in one place.</h2>
+        <p>Built around the features already inside DigiChess: online play, social tools, match records and competitive rankings.</p>
+      </div>
+      <div class="home-feature-grid">
+        <button class="home-feature-card" onclick="openPlayOnlineModal()">
+          <span class="home-feature-icon">♟</span>
+          <strong>Play Online</strong>
+          <span>Find a live opponent with synced timers and automatic colour assignment.</span>
+        </button>
+        <button class="home-feature-card" onclick="openPlayOnlineModal()">
+          <span class="home-feature-icon">♚</span>
+          <strong>Play a Friend</strong>
+          <span>Create a private code, challenge friends and keep the match connected.</span>
+        </button>
+        <button class="home-feature-card" onclick="requireAccountThen(openStatsModal)">
+          <span class="home-feature-icon">%</span>
+          <strong>Track Statistics</strong>
+          <span>Follow wins, losses, win rate, timeouts, resignations and social activity.</span>
+        </button>
+        <button class="home-feature-card" onclick="requireAccountThen(openLeaderboardsModal)">
+          <span class="home-feature-icon">#</span>
+          <strong>Leaderboards</strong>
+          <span>Compare top players by wins, losses and win/loss percentage.</span>
+        </button>
+        <button class="home-feature-card" onclick="requireAccountThen(openMessagesModal)">
+          <span class="home-feature-icon">...</span>
+          <strong>Chat</strong>
+          <span>Message friends and join DIGICHAT with account-wide notifications.</span>
+        </button>
+        <button class="home-feature-card" onclick="currentUser ? openAccountModal() : openAuthModal('signup')">
+          <span class="home-feature-icon">ID</span>
+          <strong>Account Profiles</strong>
+          <span>Manage your account, view profiles and build your friends list.</span>
+        </button>
+      </div>
+    </section>
+
+    <section class="home-split-section">
+      <div class="home-why">
+        <span class="home-kicker">Why DigiChess?</span>
+        <h2>A complete chess experience, not just a board.</h2>
+        <p>
+          DigiChess is designed to feel like a real platform: polished enough for presentation,
+          practical enough for daily games and focused on the things players actually use.
+        </p>
+        <div class="home-why-list">
+          <div><strong>Reliable online flow</strong><span>Find match, private codes and online timers are built around live Firebase sync.</span></div>
+          <div><strong>Competitive progression</strong><span>Statistics and leaderboards give every game a reason to matter.</span></div>
+          <div><strong>Social by design</strong><span>Friends, in-game requests, profiles and messaging keep players connected.</span></div>
+        </div>
+      </div>
+      <div class="home-mini-panel">
+        <h3>Platform snapshot</h3>
+        <div class="home-metric-row"><span>Game Modes</span><strong>3</strong></div>
+        <div class="home-metric-row"><span>Leaderboard Categories</span><strong>3</strong></div>
+        <div class="home-metric-row"><span>Profile Stat Groups</span><strong>3</strong></div>
+        <div class="home-metric-row"><span>Global Chat</span><strong>Live</strong></div>
+      </div>
+    </section>
+
+    <section class="home-showcase-grid">
+      <div class="home-showcase-card">
+        <div class="home-showcase-head">
+          <span class="home-kicker">Leaderboard preview</span>
+          <button class="btn btn-sm btn-ghost" onclick="requireAccountThen(openLeaderboardsModal)">View All</button>
+        </div>
+        <div class="home-leaderboard-preview" id="homeLeaderboardPreview">
+          <div class="leaderboard-row"><span class="leaderboard-rank">#1</span><span class="leaderboard-name">Loading players...</span><span class="leaderboard-value">0 wins</span></div>
+          <div class="leaderboard-row"><span class="leaderboard-rank">#2</span><span class="leaderboard-name">Player</span><span class="leaderboard-value">0 wins</span></div>
+          <div class="leaderboard-row"><span class="leaderboard-rank">#3</span><span class="leaderboard-name">Player</span><span class="leaderboard-value">0 wins</span></div>
+        </div>
+      </div>
+
+      <div class="home-showcase-card">
+        <div class="home-showcase-head">
+          <span class="home-kicker">Statistics showcase</span>
+          <button class="btn btn-sm btn-ghost" onclick="requireAccountThen(openStatsModal)">My Stats</button>
+        </div>
+        <div class="home-stats-showcase">
+          <div class="stat-tile"><span>Win Rate</span><strong>68%</strong></div>
+          <div class="stat-tile"><span>Matches</span><strong>42</strong></div>
+          <div class="stat-tile"><span>Friends Added</span><strong>12</strong></div>
+          <div class="stat-tile"><span>Timeout Wins</span><strong>7</strong></div>
+        </div>
+      </div>
+    </section>
+
+    <footer class="home-footer">
+      <div>
+        <strong>DigiChess.com</strong>
+        <span>Play, track, rank and chat in one modern chess platform.</span>
+      </div>
+      <button class="btn btn-primary btn-sm" onclick="openPlayOnlineModal()">Start Playing</button>
+    </footer>
+  </main>
+
+  <!-- ══════════════════════════════════════
        MAIN GAME LAYOUT
   ══════════════════════════════════════ -->
-  <main class="game-layout">
+  <main class="game-layout" id="gameLayout" style="display:none;">
 
     <!-- LEFT PANEL -->
     <aside class="panel panel-left">
