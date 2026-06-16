@@ -2055,12 +2055,15 @@ async function acceptFriendRequest(fromUid, fromName) {
     await db.ref(`users/${myUid}/friendRequests/${fromUid}`).remove();
 
     if (friendGameRef && currentGameFriendRequests?.[fromUid]?.toUid === myUid) {
-      await friendGameRef.child(`friendAccepts/${myUid}`).set({
+      const gameUpdates = {};
+      gameUpdates[`friendAccepts/${myUid}`] = {
         toUid: fromUid,
         fromUsername: sanitizePlayerName(currentUsername),
         toUsername: sanitizePlayerName(fromName),
         acceptedAt: firebase.database.ServerValue.TIMESTAMP
-      });
+      };
+      gameUpdates[`friendRequests/${fromUid}`] = null;
+      await friendGameRef.update(gameUpdates);
     }
   }
 
@@ -2845,6 +2848,7 @@ function mirrorInGameFriendRequests(gameData) {
 
   Object.entries(gameData.friendRequests).forEach(([fromUid, request]) => {
     if (!request || request.toUid !== currentUser.uid || fromUid === currentUser.uid) return;
+    if (gameData.friendAccepts?.[currentUser.uid]?.toUid === fromUid) return;
     const requestKey = `${fromUid}:${request.sentAt || 'pending'}`;
     if (mirroredInGameFriendRequests.has(requestKey)) return;
     mirroredInGameFriendRequests.add(requestKey);
