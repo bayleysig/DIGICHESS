@@ -116,6 +116,7 @@ let playerId        = null;        // unique ID for this player
 let friendGameRef   = null;        // reference to current game in Firebase
 let gameListener    = null;        // listener reference for unsubscribe
 let myColor         = null;        // 'w' or 'b' when playing with friend
+let gameSyncPollId  = null;        // backup poller for missed RTDB updates
 
 // Auth state
 let currentUser     = null;        // Firebase Auth user object
@@ -2521,6 +2522,36 @@ function gameStateForFirebase() {
   };
 }
 
+function gameSnapshotSignature(gameData) {
+  if (!gameData) return '';
+  return JSON.stringify({
+    players: gameData.players || null,
+    usernames: gameData.usernames || null,
+    board: gameData.board || null,
+    currentTurn: gameData.currentTurn || 'w',
+    moveHistory: gameData.moveHistory || [],
+    gameOver: !!gameData.gameOver,
+    gameOverTitle: gameData.gameOverTitle || null,
+    gameOverSub: gameData.gameOverSub || null,
+    gameOverIcon: gameData.gameOverIcon || null,
+    rematchRequest: gameData.rematchRequest || null,
+    lastMove: gameData.lastMove || null,
+    enPassantSq: gameData.enPassantSq || null,
+    castlingRights: gameData.castlingRights || null,
+    capturedByWhite: gameData.capturedByWhite || [],
+    capturedByBlack: gameData.capturedByBlack || [],
+    halfMoveClock: Number.isFinite(gameData.halfMoveClock) ? gameData.halfMoveClock : null,
+    timeControl: gameData.timeControl ?? null
+  });
+}
+
+function stopGameSyncPoller() {
+  if (gameSyncPollId) {
+    clearInterval(gameSyncPollId);
+    gameSyncPollId = null;
+  }
+}
+
 function applySyncedGameState(gameData) {
   const parsedBoard = boardFromFirebase(gameData.board);
   if (!parsedBoard || parsedBoard.length !== 8 || parsedBoard.some(r => !r || r.length !== 8)) {
@@ -2896,6 +2927,7 @@ function setupGameListener(code, closeOnStart) {
 
   const previousRef = friendGameRef;
   if (gameListener && previousRef) previousRef.off('value', gameListener);
+  stopGameSyncPoller();
   friendGameRef = db.ref(`games/${code}`);
 
   // Capture myColor at the time the listener is set up so async Firebase
@@ -2903,12 +2935,17 @@ function setupGameListener(code, closeOnStart) {
   const localMyColor = myColor;
 
   let gameStarted = false;
+  let lastProcessedSignature = null;
 
-  gameListener = friendGameRef.on('value', snapshot => {
+  const processGameSnapshot = snapshot => {
     if (!snapshot.exists()) return;
 
     const gameData    = snapshot.val();
     const playerCount = gameData.players ? Object.keys(gameData.players).length : 1;
+    const signature   = gameSnapshotSignature(gameData);
+
+    if (gameStarted && signature === lastProcessedSignature) return;
+    lastProcessedSignature = signature;
 
     syncLocalNamesFromGame(gameData);
 
@@ -2962,7 +2999,6 @@ function setupGameListener(code, closeOnStart) {
     }
 
     // ── In-progress: apply opponent's move ──
-    syncLocalNamesFromGame(gameData);
     if (!applySyncedGameState(gameData)) return;
 
     // ── Rematch accepted: game was reset — close modal and restart ──
@@ -3005,7 +3041,15 @@ function setupGameListener(code, closeOnStart) {
         }
       }
     }
-  });
+  };
+
+  gameListener = friendGameRef.on('value', processGameSnapshot);
+  gameSyncPollId = setInterval(() => {
+    if (!friendGameRef || gameMode !== 'friend') return;
+    friendGameRef.once('value').then(processGameSnapshot).catch(err => {
+      console.error('Game sync poll failed:', err);
+    });
+  }, 1000);
 }
 
 function syncMoveToFriend(notation) {
@@ -3030,6 +3074,7 @@ function exitFriendGame() {
   if (gameListener && friendGameRef) {
     friendGameRef.off('value', gameListener);
   }
+  stopGameSyncPoller();
   hideInGameChat();
   friendJoinCode   = null;
   playerId         = null;
