@@ -110,6 +110,12 @@ let capturedByBlack = [];       // pieces black has taken
 let isFlipped    = false;       // board orientation: false = white at bottom, true = black at bottom
 let gameOver     = false;
 let halfMoveClock = 0;          // for display
+let aiThinking   = false;
+let stockfishWorker = null;
+let stockfishReady = false;
+let stockfishRequestId = 0;
+let stockfishPending = null;
+let aiDifficulty = 'medium';
 
 // Timer state
 let timerWhiteSecs  = 600;
@@ -225,6 +231,8 @@ function requireAccountThen(action) {
    INITIALIZATION
 ══════════════════════════════════════════ */
 function initGame() {
+  aiThinking = false;
+  stockfishPending = null;
   board = INITIAL_BOARD.map(r => [...r]);
   currentTurn    = 'w';
   selectedSq     = null;
@@ -243,6 +251,11 @@ function initGame() {
   updateStatusBar();
   updateCapturedPieces();
   updateGameInfo();
+  updateAISettingsVisibility();
+  if (gameMode === 'ai') {
+    setAIStatus('Human plays White. Stockfish plays Black.');
+    ensureStockfish();
+  }
 }
 
 function newGame() {
@@ -362,6 +375,7 @@ function onSquareClick(row, col) {
 
   // In online games, only allow moves on your own turn
   if (gameMode === 'friend' && myColor !== currentTurn) return;
+  if (gameMode === 'ai' && currentTurn === 'b') return;
 
   const piece = board[row][col];
 
@@ -401,7 +415,7 @@ function onSquareClick(row, col) {
 /* ══════════════════════════════════════════
    MOVE EXECUTION
 ══════════════════════════════════════════ */
-function executeMove(fromRow, fromCol, toRow, toCol, special) {
+function executeMove(fromRow, fromCol, toRow, toCol, special, promotionType = null) {
   // Save state for undo
   stateHistory.push({
     board: board.map(r => [...r]),
@@ -471,6 +485,16 @@ function executeMove(fromRow, fromCol, toRow, toCol, special) {
 
   // Pawn promotion
   if (type === 'P' && (toRow === 0 || toRow === 7)) {
+    if (promotionType) {
+      const promoType = String(promotionType).toUpperCase();
+      const safePromo = ['Q', 'R', 'B', 'N'].includes(promoType) ? promoType : 'Q';
+      board[toRow][toCol] = `${color}${safePromo}`;
+      playSound('promote');
+      const notation = buildNotation(piece, fromRow, fromCol, toRow, toCol, captured || epCapture, null, safePromo);
+      halfMoveClock++;
+      finishMove(notation);
+      return;
+    }
     showPromotionModal(color, toRow, toCol, fromRow, fromCol, captured);
     return; // renderBoard called after promotion choice
   }
@@ -514,9 +538,6 @@ function finishMove(notation) {
   updateGameInfo();
   updateTimerActiveState();
 
-  // ── AI HOOK ──
-  // After a human move in AI mode, trigger the AI response.
-  // Replace makeAIMove() body with Stockfish integration.
   if (gameMode === 'ai' && currentTurn === 'b' && !gameOver) {
     setTimeout(makeAIMove, 400);
   }
@@ -528,40 +549,145 @@ function finishMove(notation) {
 }
 
 /* ══════════════════════════════════════════
-   AI INTEGRATION HOOK
-   Replace this function with Stockfish later
+   STOCKFISH AI
 ══════════════════════════════════════════ */
-function makeAIMove() {
-  // ──────────────────────────────────────────────────────────────
-  // FUTURE STOCKFISH INTEGRATION:
-  //
-  // 1. Load stockfish.js web worker
-  // 2. Send current position as FEN string: generateFEN()
-  // 3. Receive best move in UCI format (e.g. "e2e4")
-  // 4. Parse & call: executeMove(fromRow, fromCol, toRow, toCol)
-  //
-  // Example skeleton:
-  //   const fen = generateFEN();
-  //   stockfish.postMessage('position fen ' + fen);
-  //   stockfish.postMessage('go movetime 1000');
-  //   stockfish.onmessage = (e) => {
-  //     if (e.data.startsWith('bestmove')) {
-  //       const move = e.data.split(' ')[1]; // e.g. "d7d5"
-  //       const from = algebraicToRowCol(move.slice(0,2));
-  //       const to   = algebraicToRowCol(move.slice(2,4));
-  //       executeMove(from.row, from.col, to.row, to.col);
-  //     }
-  //   };
-  // ──────────────────────────────────────────────────────────────
+const AI_DIFFICULTIES = {
+  beginner: { label: 'Beginner', skill: 0, depth: 1, movetime: 250 },
+  easy:     { label: 'Easy',     skill: 3, depth: 3, movetime: 400 },
+  medium:   { label: 'Medium',   skill: 8, depth: 6, movetime: 650 },
+  hard:     { label: 'Hard',     skill: 14, depth: 10, movetime: 950 },
+  expert:   { label: 'Expert',   skill: 20, depth: 14, movetime: 1300 }
+};
 
-  // Placeholder: pick a random legal move for black
-  const allMoves = getAllLegalMovesForColor('b');
-  if (allMoves.length === 0) return;
-  const pick = allMoves[Math.floor(Math.random() * allMoves.length)];
-  executeMove(pick.fromRow, pick.fromCol, pick.toRow, pick.toCol, pick.special);
+function ensureStockfish() {
+  if (stockfishWorker) return stockfishWorker;
+  try {
+    stockfishWorker = new Worker('assets/stockfish.js');
+    stockfishWorker.onmessage = handleStockfishMessage;
+    stockfishWorker.onerror = err => {
+      console.error('Stockfish worker error:', err);
+      setAIStatus('Stockfish failed to load. Try refreshing the page.');
+      aiThinking = false;
+    };
+    sendStockfish('uci');
+    sendStockfish('isready');
+    configureStockfishDifficulty();
+    return stockfishWorker;
+  } catch (err) {
+    console.error('Unable to start Stockfish:', err);
+    setAIStatus('Stockfish is unavailable in this browser.');
+    return null;
+  }
 }
 
-/* Helper for AI placeholder */
+function sendStockfish(command) {
+  if (stockfishWorker) stockfishWorker.postMessage(command);
+}
+
+function handleStockfishMessage(event) {
+  const line = String(event.data || '');
+  if (line === 'uciok' || line === 'readyok') {
+    stockfishReady = true;
+    return;
+  }
+  if (!line.startsWith('bestmove')) return;
+
+  const bestMove = line.split(/\s+/)[1];
+  const pending = stockfishPending;
+  stockfishPending = null;
+  aiThinking = false;
+
+  if (!pending || pending.id !== stockfishRequestId || gameMode !== 'ai' || currentTurn !== 'b' || gameOver) return;
+  applyStockfishMove(bestMove);
+}
+
+function configureStockfishDifficulty() {
+  const config = AI_DIFFICULTIES[aiDifficulty] || AI_DIFFICULTIES.medium;
+  sendStockfish('setoption name Skill Level value ' + config.skill);
+  sendStockfish('setoption name Hash value 16');
+  sendStockfish('isready');
+}
+
+function makeAIMove() {
+  if (gameMode !== 'ai' || currentTurn !== 'b' || gameOver || aiThinking) return;
+  const worker = ensureStockfish();
+  if (!worker) return;
+
+  const config = AI_DIFFICULTIES[aiDifficulty] || AI_DIFFICULTIES.medium;
+  const fen = generateFEN();
+  aiThinking = true;
+  stockfishRequestId++;
+  stockfishPending = { id: stockfishRequestId, fen };
+  setAIStatus(`${config.label} Stockfish is thinking...`);
+
+  configureStockfishDifficulty();
+  sendStockfish('ucinewgame');
+  sendStockfish('position fen ' + fen);
+  sendStockfish(`go depth ${config.depth} movetime ${config.movetime}`);
+}
+
+function applyStockfishMove(uciMove) {
+  if (!uciMove || uciMove === '(none)') return;
+  const parsed = parseUCIMove(uciMove);
+  if (!parsed) {
+    console.warn('Invalid Stockfish move:', uciMove);
+    return;
+  }
+
+  const legal = getLegalMoves(parsed.from.row, parsed.from.col)
+    .find(move => move.row === parsed.to.row && move.col === parsed.to.col);
+  if (!legal) {
+    console.warn('Stockfish suggested illegal move:', uciMove, generateFEN());
+    return;
+  }
+
+  executeMove(
+    parsed.from.row,
+    parsed.from.col,
+    parsed.to.row,
+    parsed.to.col,
+    legal.special,
+    parsed.promotion
+  );
+  setAIStatus(`Stockfish played ${uciMove}.`);
+}
+
+function parseUCIMove(uciMove) {
+  const move = String(uciMove).trim().toLowerCase();
+  if (!/^[a-h][1-8][a-h][1-8][qrbn]?$/.test(move)) return null;
+  return {
+    from: algebraicToRowCol(move.slice(0, 2)),
+    to: algebraicToRowCol(move.slice(2, 4)),
+    promotion: move[4] ? move[4].toUpperCase() : null
+  };
+}
+
+function algebraicToRowCol(square) {
+  const files = 'abcdefgh';
+  return {
+    row: 8 - Number(square[1]),
+    col: files.indexOf(square[0])
+  };
+}
+
+function changeAIDifficulty() {
+  const select = document.getElementById('aiDifficultySelect');
+  aiDifficulty = select?.value || 'medium';
+  configureStockfishDifficulty();
+  const config = AI_DIFFICULTIES[aiDifficulty] || AI_DIFFICULTIES.medium;
+  setAIStatus(`Difficulty set to ${config.label}. Human plays White.`);
+}
+
+function updateAISettingsVisibility() {
+  const card = document.getElementById('aiSettingsCard');
+  if (card) card.style.display = gameMode === 'ai' ? 'block' : 'none';
+}
+
+function setAIStatus(message) {
+  const status = document.getElementById('aiStatus');
+  if (status) status.textContent = message;
+}
+
 function getAllLegalMovesForColor(color) {
   const moves = [];
   for (let r = 0; r < 8; r++) {
@@ -1344,14 +1470,6 @@ function formatTime(secs) {
 function setGameMode(mode) {
   if (mode === 'friend') {
     openPlayOnlineModal();
-    return;
-  }
-  
-  if (mode === 'ai') {
-    const banner = document.getElementById('aiBanner');
-    banner.style.display = 'flex';
-    showGamePage();
-    updatePrimaryNavState('ai');
     return;
   }
   

@@ -294,6 +294,21 @@
         </div>
       </div>
 
+      <div class="card" id="aiSettingsCard" style="display:none;">
+        <h3 class="card-title">Stockfish AI</h3>
+        <div class="ai-settings">
+          <label class="ai-setting-label" for="aiDifficultySelect">Difficulty</label>
+          <select class="timer-select" id="aiDifficultySelect" onchange="changeAIDifficulty()" style="width:100%;">
+            <option value="beginner">Beginner</option>
+            <option value="easy">Easy</option>
+            <option value="medium" selected>Medium</option>
+            <option value="hard">Hard</option>
+            <option value="expert">Expert</option>
+          </select>
+          <div class="ai-status" id="aiStatus">Human plays White. Stockfish plays Black.</div>
+        </div>
+      </div>
+
     </aside>
 
     <!-- CENTER: Board -->
