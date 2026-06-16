@@ -3369,9 +3369,7 @@ async function loadLeaderboard() {
   list.innerHTML = '<p class="friends-empty">Loading leaderboard...</p>';
 
   try {
-    const snap = await db.ref('leaderboards').orderByChild(category).limitToLast(5).once('value');
-    const rows = [];
-    snap.forEach(child => rows.push({ uid: child.key, ...(child.val() || {}) }));
+    const rows = await loadAllAccountLeaderboardRows();
     rows.sort((a, b) => (Number(b[category]) || 0) - (Number(a[category]) || 0));
 
     const filtered = category === 'winRate'
@@ -3399,6 +3397,41 @@ async function loadLeaderboard() {
     console.error('Leaderboard load failed:', err);
     list.innerHTML = '<p class="friends-empty">Unable to load leaderboards right now.</p>';
   }
+}
+
+async function loadAllAccountLeaderboardRows() {
+  const usernameSnap = await db.ref('usernames').once('value');
+  const usernames = usernameSnap.val() || {};
+  const entries = Object.entries(usernames);
+
+  const rows = await Promise.all(entries.map(async ([username, uid]) => {
+    try {
+      const statsSnap = await db.ref(`users/${uid}/stats`).once('value');
+      const stats = { ...emptyStats(), ...(statsSnap.val() || {}) };
+      const wins = Number(stats.wins) || 0;
+      const losses = Number(stats.losses) || 0;
+      const decisiveGames = wins + losses;
+      return {
+        uid,
+        username,
+        wins,
+        losses,
+        winRate: decisiveGames > 0 ? Math.round((wins / decisiveGames) * 10000) / 100 : 0,
+        onlineMatches: Number(stats.onlineMatches) || 0
+      };
+    } catch (_) {
+      return {
+        uid,
+        username,
+        wins: 0,
+        losses: 0,
+        winRate: 0,
+        onlineMatches: 0
+      };
+    }
+  }));
+
+  return rows.filter(row => row.username && !String(row.username).startsWith('guest_'));
 }
 
 function createFriendGame() {
