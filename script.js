@@ -767,14 +767,14 @@ function buildNotation(piece, fromRow, fromCol, toRow, toCol, captured, special,
 /* ══════════════════════════════════════════
    GAME OVER
 ══════════════════════════════════════════ */
-function triggerGameOver(reason, lastNotation, timedOutColor = null) {
+function triggerGameOver(reason, lastNotation, forcedLoserColor = null) {
   gameOver = true;
   stopTimers();
 
   // In online mode use usernames, otherwise use colour names
-  const loserColor   = timedOutColor || (currentTurn === 'w' ? 'White' : 'Black');
-  const winnerColor  = timedOutColor
-    ? (timedOutColor === 'White' ? 'Black' : 'White')
+  const loserColor   = forcedLoserColor || (currentTurn === 'w' ? 'White' : 'Black');
+  const winnerColor  = forcedLoserColor
+    ? (forcedLoserColor === 'White' ? 'Black' : 'White')
     : (currentTurn === 'w' ? 'Black' : 'White'); // who just moved wins
 
   // Resolve display names using myColor so it works regardless of who is host/joiner
@@ -821,6 +821,7 @@ function triggerGameOver(reason, lastNotation, timedOutColor = null) {
   // Sync game over state to Firebase for online games
   if (gameMode === 'friend' && friendGameRef) {
     friendGameRef.update({
+      ...gameStateForFirebase(),
       gameOver:        true,
       gameOverReason:  reason,
       gameOverWinner:  winnerColor,   // 'White' or 'Black'
@@ -899,7 +900,10 @@ function undoMove() {
 ══════════════════════════════════════════ */
 function resignGame() {
   if (gameOver) return;
-  triggerGameOver('resign', '');
+  const resigningColor = gameMode === 'friend' && myColor
+    ? (myColor === 'w' ? 'White' : 'Black')
+    : (currentTurn === 'w' ? 'White' : 'Black');
+  triggerGameOver('resign', '', resigningColor);
   gameOver = true;
   updateStatusBar();
 }
@@ -2928,6 +2932,8 @@ function needsApplyGameState(gameData) {
   if (!remoteBoard) return true;
   const remoteTurn  = gameData.currentTurn || 'w';
   const remoteMoves = normalizeMoveHistory(gameData.moveHistory);
+  if (!!gameData.gameOver !== gameOver) return true;
+  if (gameData.gameOverReason) return true;
   if (remoteTurn !== currentTurn) return true;
   if (remoteMoves.length !== moveHistory.length) return true;
   if (!boardsEqual(remoteBoard, board)) return true;
