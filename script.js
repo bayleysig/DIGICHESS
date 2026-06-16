@@ -2935,11 +2935,13 @@ function joinFriendGame() {
 
 function setupGameListener(code, closeOnStart) {
   if (!db) { console.error('Firebase not initialized'); return; }
+  console.log(`[SETUP] called — code=${code} myColor=${myColor} closeOnStart=${closeOnStart}`);
 
   const previousRef = friendGameRef;
-  if (gameListener && previousRef) previousRef.off('value', gameListener);
+  if (gameListener && previousRef) { console.log('[SETUP] detaching old listener'); previousRef.off('value', gameListener); }
   stopGameSyncPoller();
   friendGameRef = db.ref(`games/${code}`);
+  console.log('[SETUP] listening on:', friendGameRef.toString());
 
   // Capture myColor at the time the listener is set up so async Firebase
   // callbacks always use the correct value, even if the global is later changed.
@@ -2955,7 +2957,8 @@ function setupGameListener(code, closeOnStart) {
     const playerCount = gameData.players ? Object.keys(gameData.players).length : 1;
     const signature   = gameSnapshotSignature(gameData);
 
-    if (gameStarted && signature === lastProcessedSignature) return;
+    console.log(`[SNAP] fired — gameStarted=${gameStarted} turn=${gameData.currentTurn} dupSig=${gameStarted && signature === lastProcessedSignature}`);
+    if (gameStarted && signature === lastProcessedSignature) { console.log('[SNAP] skipped — duplicate signature'); return; }
     lastProcessedSignature = signature;
 
     syncLocalNamesFromGame(gameData);
@@ -3055,7 +3058,9 @@ function setupGameListener(code, closeOnStart) {
     }
   };
 
+  console.log('[SETUP] attaching .on(value) listener');
   gameListener = friendGameRef.on('value', processGameSnapshot);
+  console.log('[SETUP] listener attached, gameListener=', !!gameListener);
   gameSyncPollId = setInterval(() => {
     if (!friendGameRef || gameMode !== 'friend') return;
     friendGameRef.once('value').then(processGameSnapshot).catch(err => {
