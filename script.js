@@ -1894,12 +1894,7 @@ async function loadFriendsModal() {
     friendsList.innerHTML = '<p class="friends-empty">No friends yet. Add someone below!</p>';
   } else {
     for (const fuid of friendUids) {
-      const friendData = friends[fuid];
-      let fname = typeof friendData === 'object' && friendData?.username ? friendData.username : fuid;
-      try {
-        const nameSnap = await db.ref(`users/${fuid}/username`).once('value');
-        fname = nameSnap.val() || fname;
-      } catch (_) {}
+      const fname = await resolveFriendDisplayName(fuid, friends[fuid]);
       const row = document.createElement('div');
       row.className = 'friend-row';
       row.innerHTML = `
@@ -1945,6 +1940,33 @@ async function loadFriendsModal() {
   document.getElementById('addFriendInput').value = '';
   document.getElementById('addFriendError').style.display = 'none';
   document.getElementById('addFriendSuccess').style.display = 'none';
+}
+
+async function resolveFriendDisplayName(uid, friendData = null) {
+  const storedName = typeof friendData === 'object' && friendData?.username ? friendData.username : null;
+  if (storedName && storedName !== uid) return sanitizePlayerName(storedName, 'Player');
+
+  const onlineName = getOnlinePlayerNameByUid(uid);
+  if (onlineName) return onlineName;
+
+  try {
+    const nameSnap = await db.ref(`users/${uid}/username`).once('value');
+    const name = nameSnap.val();
+    if (name && name !== uid) return sanitizePlayerName(name, 'Player');
+  } catch (_) {}
+
+  return 'Player';
+}
+
+function getOnlinePlayerNameByUid(uid) {
+  if (!uid) return null;
+  if (uid === onlinePlayerUidByColor.w) {
+    return sanitizePlayerName(document.getElementById('infoWhitePlayer')?.textContent || null, 'Player');
+  }
+  if (uid === onlinePlayerUidByColor.b) {
+    return sanitizePlayerName(document.getElementById('infoBlackPlayer')?.textContent || null, 'Player');
+  }
+  return null;
 }
 
 async function sendFriendRequest() {
@@ -1999,8 +2021,12 @@ async function sendFriendRequest() {
 
 async function acceptFriendRequest(fromUid, fromName) {
   const myUid = currentUser.uid;
+  const displayFromName = sanitizePlayerName(
+    fromName && fromName !== fromUid ? fromName : getOnlinePlayerNameByUid(fromUid),
+    'Player'
+  );
   const myFriendEntry = {
-    username: sanitizePlayerName(fromName),
+    username: displayFromName,
     addedAt: firebase.database.ServerValue.TIMESTAMP
   };
   const theirFriendEntry = {
