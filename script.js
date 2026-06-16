@@ -1894,8 +1894,12 @@ async function loadFriendsModal() {
     friendsList.innerHTML = '<p class="friends-empty">No friends yet. Add someone below!</p>';
   } else {
     for (const fuid of friendUids) {
-      const nameSnap = await db.ref(`users/${fuid}/username`).once('value');
-      const fname = nameSnap.val() || fuid;
+      const friendData = friends[fuid];
+      let fname = typeof friendData === 'object' && friendData?.username ? friendData.username : fuid;
+      try {
+        const nameSnap = await db.ref(`users/${fuid}/username`).once('value');
+        fname = nameSnap.val() || fname;
+      } catch (_) {}
       const row = document.createElement('div');
       row.className = 'friend-row';
       row.innerHTML = `
@@ -1983,7 +1987,10 @@ async function sendFriendRequest() {
   }
 
   // Send request (stored under target's incoming requests)
-  await db.ref(`users/${targetUid}/friendRequests/${myUid}`).set(true);
+  await db.ref(`users/${targetUid}/friendRequests/${myUid}`).set({
+    fromUsername: sanitizePlayerName(currentUsername),
+    sentAt: firebase.database.ServerValue.TIMESTAMP
+  });
 
   successEl.textContent  = `Friend request sent to ${targetUsername}!`;
   successEl.style.display = 'block';
@@ -1992,16 +1999,24 @@ async function sendFriendRequest() {
 
 async function acceptFriendRequest(fromUid, fromName) {
   const myUid = currentUser.uid;
+  const myFriendEntry = {
+    username: sanitizePlayerName(fromName),
+    addedAt: firebase.database.ServerValue.TIMESTAMP
+  };
+  const theirFriendEntry = {
+    username: sanitizePlayerName(currentUsername),
+    addedAt: firebase.database.ServerValue.TIMESTAMP
+  };
   const updates = {};
-  updates[`users/${myUid}/friends/${fromUid}`] = true;
+  updates[`users/${myUid}/friends/${fromUid}`] = myFriendEntry;
   updates[`users/${myUid}/friendRequests/${fromUid}`] = null;
 
   try {
-    updates[`users/${fromUid}/friends/${myUid}`] = true;
+    updates[`users/${fromUid}/friends/${myUid}`] = theirFriendEntry;
     await db.ref().update(updates);
   } catch (err) {
     console.warn('Reciprocal friend write failed; using in-game accept handoff:', err);
-    await db.ref(`users/${myUid}/friends/${fromUid}`).set(true);
+    await db.ref(`users/${myUid}/friends/${fromUid}`).set(myFriendEntry);
     await db.ref(`users/${myUid}/friendRequests/${fromUid}`).remove();
 
     if (friendGameRef && currentGameFriendRequests?.[fromUid]?.toUid === myUid) {
@@ -2029,7 +2044,11 @@ async function removeFriend(fuid, fname) {
   const updates = {};
   updates[`users/${myUid}/friends/${fuid}`]  = null;
   updates[`users/${fuid}/friends/${myUid}`]  = null;
-  await db.ref().update(updates);
+  try {
+    await db.ref().update(updates);
+  } catch (_) {
+    await db.ref(`users/${myUid}/friends/${fuid}`).remove();
+  }
   loadFriendsModal();
 }
 
@@ -2041,7 +2060,10 @@ async function addFriendByUsername(username) {
   const targetUid = snap.val();
   const alreadySnap = await db.ref(`users/${currentUser.uid}/friends/${targetUid}`).once('value');
   if (alreadySnap.exists()) { alert('Already friends!'); return; }
-  await db.ref(`users/${targetUid}/friendRequests/${currentUser.uid}`).set(true);
+  await db.ref(`users/${targetUid}/friendRequests/${currentUser.uid}`).set({
+    fromUsername: sanitizePlayerName(currentUsername),
+    sentAt: firebase.database.ServerValue.TIMESTAMP
+  });
   alert(`Friend request sent to ${username}!`);
 }
 
@@ -2786,7 +2808,10 @@ function mirrorInGameFriendAccepts(gameData) {
     if (mirroredInGameFriendAccepts.has(acceptKey)) return;
     mirroredInGameFriendAccepts.add(acceptKey);
 
-    db.ref(`users/${currentUser.uid}/friends/${fromUid}`).set(true).then(() => {
+    db.ref(`users/${currentUser.uid}/friends/${fromUid}`).set({
+      username: sanitizePlayerName(accept.fromUsername),
+      addedAt: accept.acceptedAt || firebase.database.ServerValue.TIMESTAMP
+    }).then(() => {
       db.ref(`users/${currentUser.uid}/friendRequests/${fromUid}`).remove().catch(() => {});
       updateGameInfo();
     }).catch(err => {
