@@ -759,13 +759,15 @@ function buildNotation(piece, fromRow, fromCol, toRow, toCol, captured, special,
 /* ══════════════════════════════════════════
    GAME OVER
 ══════════════════════════════════════════ */
-function triggerGameOver(reason, lastNotation) {
+function triggerGameOver(reason, lastNotation, timedOutColor = null) {
   gameOver = true;
   stopTimers();
 
   // In online mode use usernames, otherwise use colour names
-  const winnerColor  = currentTurn === 'w' ? 'Black' : 'White'; // who just moved wins
-  const loserColor   = currentTurn === 'w' ? 'White' : 'Black';
+  const loserColor   = timedOutColor || (currentTurn === 'w' ? 'White' : 'Black');
+  const winnerColor  = timedOutColor
+    ? (timedOutColor === 'White' ? 'Black' : 'White')
+    : (currentTurn === 'w' ? 'Black' : 'White'); // who just moved wins
 
   // Resolve display names using myColor so it works regardless of who is host/joiner
   function nameForColor(color) {
@@ -802,7 +804,7 @@ function triggerGameOver(reason, lastNotation) {
     icon  = winnerColor === 'White' ? '♔' : '♚';
   } else if (reason === 'timeout') {
     title = `${winnerName} wins on time!`;
-    sub   = 'The clock ran out.';
+    sub   = `${loserName}'s clock reached 0.`;
     icon  = '⏱';
   }
 
@@ -817,6 +819,9 @@ function triggerGameOver(reason, lastNotation) {
       gameOverTitle:   title,
       gameOverSub:     sub,
       gameOverIcon:    icon,
+      timerWhiteSecs:  timerWhiteSecs,
+      timerBlackSecs:  timerBlackSecs,
+      timerLimitSecs:  timerLimitSecs,
       rematchRequest:  null           // clear any prior rematch on new game-over
     });
   }
@@ -1081,8 +1086,18 @@ function startTimers() {
     if (currentTurn === 'w') timerWhiteSecs--;
     else                     timerBlackSecs--;
 
-    if (timerWhiteSecs <= 0) { timerWhiteSecs = 0; updateTimerDisplays(); triggerGameOver('timeout',''); return; }
-    if (timerBlackSecs <= 0) { timerBlackSecs = 0; updateTimerDisplays(); triggerGameOver('timeout',''); return; }
+    if (timerWhiteSecs <= 0) {
+      timerWhiteSecs = 0;
+      updateTimerDisplays();
+      triggerGameOver('timeout', '', 'White');
+      return;
+    }
+    if (timerBlackSecs <= 0) {
+      timerBlackSecs = 0;
+      updateTimerDisplays();
+      triggerGameOver('timeout', '', 'Black');
+      return;
+    }
 
     updateTimerDisplays();
   }, 1000);
@@ -1122,7 +1137,11 @@ function updateTimerControls() {
   const preset   = document.getElementById('timerPreset');
   const editable = canEditTimerSettings();
 
-  if (controls) controls.style.display = editable ? 'flex' : 'none';
+  document.body?.classList.toggle('online-timer-locked', !editable);
+  if (controls) {
+    controls.hidden = !editable;
+    controls.style.display = editable ? 'flex' : 'none';
+  }
   if (startBtn) startBtn.disabled = !editable;
   if (resetBtn) resetBtn.disabled = !editable;
   if (preset) {

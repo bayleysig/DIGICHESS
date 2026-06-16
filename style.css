@@ -266,6 +266,9 @@ body {
   gap: 6px;
   align-items: center;
 }
+body.online-timer-locked .timer-controls {
+  display: none !important;
+}
 .timer-select {
   flex: 1;
   background: var(--bg-panel);
