@@ -992,6 +992,11 @@ body.online-timer-locked .timer-controls {
   flex-shrink: 0;
 }
 .add-friend-btn:hover { background: var(--green-glow); }
+.add-friend-btn:disabled,
+.add-friend-btn.request-sent {
+  cursor: default;
+  opacity: 0.75;
+}
 
 .already-friend-btn {
   background: var(--green-subtle);

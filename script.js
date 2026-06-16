@@ -128,6 +128,7 @@ let currentUsername = null;        // display username
 let opponentUsername = null;       // the other player's username in a friend game
 let hostUsername     = null;       // username of who created the game
 let joinerUsername   = null;       // username of who joined the game
+let onlinePlayerUidByColor = { w: null, b: null };
 
 /* ══════════════════════════════════════════
    MULTIPLAYER HELPER FUNCTIONS (defined early)
@@ -1027,7 +1028,17 @@ function updateGameInfo() {
     if (playerNamesSection) playerNamesSection.style.display = 'block';
   } else {
     if (playerNamesSection) playerNamesSection.style.display = 'none';
+    hidePlayerSlotButtons();
   }
+}
+
+function hidePlayerSlotButtons() {
+  ['White', 'Black'].forEach(color => {
+    const addBtn    = document.getElementById(`addFriend${color}`);
+    const friendBtn = document.getElementById(`alreadyFriend${color}`);
+    if (addBtn) addBtn.style.display = 'none';
+    if (friendBtn) friendBtn.style.display = 'none';
+  });
 }
 
 /**
@@ -1044,6 +1055,9 @@ async function updatePlayerSlotButton(color, playerName, myName) {
   // Hide both to start
   addBtn.style.display    = 'none';
   friendBtn.style.display = 'none';
+  addBtn.disabled = false;
+  addBtn.classList.remove('request-sent');
+  addBtn.title = 'Add friend';
 
   // Don't show anything next to our own name
   if (playerName === myName) return;
@@ -1052,25 +1066,66 @@ async function updatePlayerSlotButton(color, playerName, myName) {
   if (!currentUser || !db) return;
   if (currentUser.isAnonymous) return;
 
-  // Look up the opponent's UID — if they're a guest their username won't be
-  // in the usernames index, so snap won't exist → no button shown
   try {
-    const snap = await db.ref(`usernames/${playerName.toLowerCase()}`).once('value');
-    if (!snap.exists()) return;  // guest accounts aren't in the index → hide buttons
-    const oppUid = snap.val();
-
-    // Check if the opponent is a guest via their DB entry
-    const guestSnap = await db.ref(`users/${oppUid}/isGuest`).once('value');
-    if (guestSnap.val() === true) return;  // opponent is a guest → no add button
+    const oppUid = getOnlinePlayerUidForDisplayColor(color);
+    if (!oppUid || oppUid === currentUser.uid) return;
 
     const friendSnap = await db.ref(`users/${currentUser.uid}/friends/${oppUid}`).once('value');
     if (friendSnap.exists()) {
       friendBtn.style.display = 'inline-flex';
     } else {
+      addBtn.disabled = false;
+      addBtn.title = `Add ${playerName}`;
       addBtn.style.display = 'inline-flex';
     }
   } catch (_) {
     // fail silently
+  }
+}
+
+function getOnlinePlayerUidForDisplayColor(color) {
+  return color === 'White' ? onlinePlayerUidByColor.w : onlinePlayerUidByColor.b;
+}
+
+async function addFriendFromPlayerSlot(color) {
+  if (!currentUser) { openAuthModal('signup'); return; }
+  if (!db) return;
+
+  const targetUid = getOnlinePlayerUidForDisplayColor(color);
+  const nameEl = document.getElementById(`info${color}Player`);
+  const targetName = nameEl?.textContent || 'opponent';
+  const addBtn = document.getElementById(`addFriend${color}`);
+  const friendBtn = document.getElementById(`alreadyFriend${color}`);
+
+  if (!targetUid || targetUid === currentUser.uid) return;
+
+  try {
+    const alreadySnap = await db.ref(`users/${currentUser.uid}/friends/${targetUid}`).once('value');
+    if (alreadySnap.exists()) {
+      if (addBtn) addBtn.style.display = 'none';
+      if (friendBtn) friendBtn.style.display = 'inline-flex';
+      openFriendsModal();
+      return;
+    }
+
+    if (addBtn) {
+      addBtn.disabled = true;
+      addBtn.title = 'Sending request...';
+    }
+
+    await db.ref(`users/${targetUid}/friendRequests/${currentUser.uid}`).set(true);
+
+    if (addBtn) {
+      addBtn.title = `Friend request sent to ${targetName}`;
+      addBtn.classList.add('request-sent');
+    }
+  } catch (err) {
+    console.error('In-game friend request failed:', err);
+    if (addBtn) {
+      addBtn.disabled = false;
+      addBtn.title = 'Add friend';
+    }
+    alert('Unable to send friend request right now.');
   }
 }
 
@@ -1787,7 +1842,8 @@ document.addEventListener('click', e => {
 });
 
 function openFriendsModal() {
-  document.getElementById('profileDropdown').style.display = 'none';
+  const dropdown = document.getElementById('profileDropdown');
+  if (dropdown) dropdown.style.display = 'none';
   document.getElementById('friendsModal').style.display = 'flex';
   loadFriendsModal();
 }
@@ -2538,6 +2594,13 @@ function syncLocalNamesFromGame(gameData) {
   if (!gameData) return;
   const mySlot = playerSlotForUid(gameData, currentUser?.uid);
   const otherSlot = mySlot === 'host' ? 'joiner' : mySlot === 'joiner' ? 'host' : null;
+  onlinePlayerUidByColor = { w: null, b: null };
+
+  if (gameData.colors) {
+    Object.entries(gameData.colors).forEach(([uid, color]) => {
+      if (color === 'w' || color === 'b') onlinePlayerUidByColor[color] = uid;
+    });
+  }
 
   hostUsername   = playerNameForSlot(gameData, 'host', hostUsername || 'Player');
   joinerUsername = playerNameForSlot(gameData, 'joiner', joinerUsername || 'Player');
@@ -3252,6 +3315,7 @@ function exitFriendGame() {
   hostUsername     = null;
   joinerUsername   = null;
   opponentUsername = null;
+  onlinePlayerUidByColor = { w: null, b: null };
   newGame();
 }
 
