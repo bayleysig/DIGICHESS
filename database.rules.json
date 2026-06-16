@@ -14,11 +14,7 @@
       ".indexOn": ["players/joiner", "players/host"],
       "$gameId": {
         ".read": "auth != null",
-        ".write": "auth != null && (
-          !data.exists() ||
-          data.child('players').child('host').val() === auth.uid ||
-          data.child('players').child('joiner').val() === auth.uid
-        )"
+        ".write": "auth != null && (!data.exists() || data.child('players').child('host').val() === auth.uid || data.child('players').child('joiner').val() === auth.uid || (!data.child('players').child('joiner').exists() && newData.child('players').child('host').val() === data.child('players').child('host').val() && newData.child('players').child('joiner').val() === auth.uid))"
       }
     },
     "matchmaking": {

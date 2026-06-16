@@ -2159,6 +2159,9 @@ function startMatchAcceptedListener() {
     db.ref().update(updates).then(() => {
       closeModal('friendsModal');
       setupGameListener(friendJoinCode, true);
+    }).catch(err => {
+      console.error('Accepted match join failed:', err);
+      alert('Unable to join the accepted match right now. Please try again.');
     });
   });
 }
@@ -2591,11 +2594,57 @@ function findMatch() {
       });
 
   ensureUsername.then(myUsername => {
-    const myRef = db.ref(`matchmaking/${uid}`);
+    const myRef     = db.ref(`matchmaking/${uid}`);
+    const myPairRef = db.ref(`matchmakingPairs/${uid}`);
+    myPairRef.remove().catch(() => {});
     myRef.set({ username: myUsername, joinedAt: firebase.database.ServerValue.TIMESTAMP });
     myRef.onDisconnect().remove();
+    myPairRef.onDisconnect().remove();
+    matchmakingPairsRef = myPairRef;
 
     let paired = false;
+
+    const joinMatchedQuickPlayGame = async code => {
+      const gameSnap = await db.ref(`games/${code}`).once('value');
+      if (!gameSnap.exists()) throw new Error('Matched game was not found.');
+
+      const gameData = gameSnap.val();
+      const colors   = gameData.colors || {};
+      const names    = gameData.usernames || {};
+
+      myColor          = colors[uid] || (gameData.players?.host === uid ? 'b' : 'w');
+      isFlipped        = (myColor === 'b');
+      gameMode         = 'friend';
+      friendJoinCode   = code;
+      playerId         = uid;
+      hostUsername     = sanitizePlayerName(names.host, 'Player');
+      joinerUsername   = sanitizePlayerName(names.joiner, currentUsername || 'Player');
+      opponentUsername = myColor === 'w' ? hostUsername : joinerUsername;
+
+      document.getElementById('matchmakingText').textContent = 'Found opponent! Loading…';
+      document.getElementById('friendModal').style.display   = 'none';
+      setupGameListener(code, true);
+    };
+
+    matchmakingPairsListener = myPairRef.on('value', async snap => {
+      if (!snap.exists() || paired) return;
+
+      const pairData = snap.val() || {};
+      if (!pairData.code) return;
+
+      paired = true;
+      stopMatchmakingListener();
+
+      try {
+        await myPairRef.remove();
+        await joinMatchedQuickPlayGame(pairData.code);
+      } catch (err) {
+        console.error('Quick play match handoff failed:', err);
+        paired = false;
+        document.getElementById('matchmakingStatus').style.display = 'none';
+        document.getElementById('qpIdle').style.display            = 'block';
+      }
+    });
 
     // ── Try to claim an opponent from the queue ──
     const tryPair = async snap => {
@@ -2668,6 +2717,11 @@ function findMatch() {
       };
 
       await db.ref(`games/${friendJoinCode}`).set(gameData);
+      await db.ref(`matchmakingPairs/${opponentUid}`).set({
+        code: friendJoinCode,
+        opponentUid: uid,
+        createdAt: firebase.database.ServerValue.TIMESTAMP
+      });
 
       document.getElementById('matchmakingText').textContent = `Found ${resolvedOpponentName}! Loading…`;
       document.getElementById('friendModal').style.display   = 'none';
@@ -2682,57 +2736,7 @@ function findMatch() {
     quickPlayGameListener = myRef.on('value', async snap => {
       if (snap.exists()) return; // still in queue
       if (paired) return;
-      paired = true;
-
-      stopMatchmakingListener();
-
-      // Scan games/ for the room created for us
-      // Check both host and joiner slots since color is assigned by UID sort
-      const findMyGame = async () => {
-        let code = null, gameData = null;
-        const checks = [
-          db.ref('games').orderByChild('players/joiner').equalTo(uid).limitToLast(3).once('value'),
-          db.ref('games').orderByChild('players/host').equalTo(uid).limitToLast(3).once('value')
-        ];
-        const results = await Promise.all(checks);
-        for (const snap of results) {
-          if (snap.exists()) {
-            snap.forEach(s => { code = s.key; gameData = s.val(); });
-            if (code) break;
-          }
-        }
-        return { code, gameData };
-      };
-
-      let { code, gameData } = await findMyGame();
-
-      if (!code || !gameData) {
-        // Retry after a short wait — game may not be written yet
-        await new Promise(r => setTimeout(r, 1500));
-        ({ code, gameData } = await findMyGame());
-      }
-
-      if (!code || !gameData) {
-        paired = false;
-        document.getElementById('matchmakingStatus').style.display = 'none';
-        document.getElementById('qpIdle').style.display            = 'block';
-        return;
-      }
-
-      const colors = gameData.colors || {};
-      myColor        = colors[uid] || 'w';
-      isFlipped      = (myColor === 'b');
-      gameMode       = 'friend';
-      friendJoinCode = code;
-      playerId       = uid;
-      const names    = gameData.usernames || {};
-      hostUsername   = sanitizePlayerName(names.host, 'Player');
-      joinerUsername = sanitizePlayerName(names.joiner, currentUsername || 'Player');
-      opponentUsername = myColor === 'w' ? hostUsername : joinerUsername;
-
-      document.getElementById('matchmakingText').textContent = 'Found opponent! Loading\u2026';
-      document.getElementById('friendModal').style.display   = 'none';
-      setupGameListener(code, true);
+      document.getElementById('matchmakingText').textContent = 'Match found! Finalizing game…';
     });
   });
 }
@@ -2748,6 +2752,9 @@ function stopMatchmakingListener() {
     db.ref(`matchmaking/${currentUser.uid}`).off('value', quickPlayGameListener);
     quickPlayGameListener = null;
   }
+  if (matchmakingPairsRef && matchmakingPairsListener) {
+    matchmakingPairsRef.off('value', matchmakingPairsListener);
+  }
   matchmakingPairsRef      = null;
   matchmakingPairsListener = null;
 }
@@ -2756,6 +2763,7 @@ function cancelMatchmaking() {
   if (!db || !currentUser) return;
   stopMatchmakingListener();
   db.ref(`matchmaking/${currentUser.uid}`).remove();
+  db.ref(`matchmakingPairs/${currentUser.uid}`).remove();
   document.getElementById('matchmakingStatus').style.display = 'none';
   document.getElementById('qpIdle').style.display            = 'block';
 }
@@ -2875,6 +2883,10 @@ function joinFriendGame() {
     db.ref().update(updates).then(() => {
       closeModal('friendModal');
       setupGameListener(friendJoinCode, true);
+    }).catch(err => {
+      console.error('Join game failed:', err);
+      errorEl.textContent = 'Unable to join this game right now. Please try again.';
+      errorEl.style.display = 'block';
     });
   });
 }
@@ -2882,8 +2894,9 @@ function joinFriendGame() {
 function setupGameListener(code, closeOnStart) {
   if (!db) { console.error('Firebase not initialized'); return; }
 
+  const previousRef = friendGameRef;
+  if (gameListener && previousRef) previousRef.off('value', gameListener);
   friendGameRef = db.ref(`games/${code}`);
-  if (gameListener) friendGameRef.off('value', gameListener);
 
   // Capture myColor at the time the listener is set up so async Firebase
   // callbacks always use the correct value, even if the global is later changed.
