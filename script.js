@@ -1766,6 +1766,9 @@ function friendlyAuthError(code) {
       return 'Password must be at least 6 characters.';
     case 'auth/email-already-in-use':
       return 'That username is already taken. Try another.';
+    case 'PERMISSION_DENIED':
+    case 'permission_denied':
+      return 'Account setup is blocked by database permissions. Please try again after the latest rules are deployed.';
     default:
       return 'Something went wrong. Please try again.';
   }
