@@ -60,6 +60,10 @@
           <svg viewBox="0 0 20 20" fill="currentColor" width="15" height="15"><path fill-rule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clip-rule="evenodd"/></svg>
           Account
         </button>
+        <button class="dropdown-item" id="dropdownSettings" onclick="openSettingsModal()">
+          <svg viewBox="0 0 20 20" fill="currentColor" width="15" height="15"><path fill-rule="evenodd" d="M11.49 3.17a1 1 0 00-1.98 0l-.13.78a6.94 6.94 0 00-1.08.45l-.65-.46a1 1 0 00-1.4.19L5.11 5.86a1 1 0 00.19 1.39l.64.45c-.06.36-.06.74 0 1.1l-.64.45a1 1 0 00-.19 1.39l1.14 1.73a1 1 0 001.4.19l.65-.46c.34.19.7.34 1.08.45l.13.78a1 1 0 001.98 0l.13-.78c.38-.11.74-.26 1.08-.45l.65.46a1 1 0 001.4-.19l1.14-1.73a1 1 0 00-.19-1.39l-.64-.45c.06-.36.06-.74 0-1.1l.64-.45a1 1 0 00.19-1.39l-1.14-1.73a1 1 0 00-1.4-.19l-.65.46a6.94 6.94 0 00-1.08-.45l-.13-.78zM10.5 10.5a2 2 0 100-4 2 2 0 000 4z" clip-rule="evenodd"/></svg>
+          Settings
+        </button>
         <button class="dropdown-item" id="dropdownStats" onclick="openStatsModal()">
           <svg viewBox="0 0 20 20" fill="currentColor" width="15" height="15"><path d="M2 11a1 1 0 011-1h2a1 1 0 011 1v6H2v-6zM8 7a1 1 0 011-1h2a1 1 0 011 1v10H8V7zM14 3a1 1 0 011-1h2a1 1 0 011 1v14h-4V3z"/></svg>
           Statistics
@@ -686,6 +690,84 @@
 
       <div class="modal-actions" style="margin-top:16px;">
         <button class="btn btn-ghost" onclick="closeModal('accountModal')">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="settingsModal" style="display:none;">
+    <div class="modal account-modal settings-modal">
+      <h2 class="modal-title">Settings</h2>
+      <p class="modal-sub">Personalise your board, sounds and local game preferences.</p>
+
+      <div class="account-section">
+        <h3 class="account-section-title">Board Theme</h3>
+        <div class="settings-theme-grid">
+          <button class="theme-choice active" data-theme="classic" onclick="setBoardTheme('classic')"><span class="theme-swatch classic"></span><span>Classic</span></button>
+          <button class="theme-choice" data-theme="green" onclick="setBoardTheme('green')"><span class="theme-swatch green"></span><span>Green</span></button>
+          <button class="theme-choice" data-theme="blue" onclick="setBoardTheme('blue')"><span class="theme-swatch blue"></span><span>Blue</span></button>
+          <button class="theme-choice" data-theme="purple" onclick="setBoardTheme('purple')"><span class="theme-swatch purple"></span><span>Purple</span></button>
+          <button class="theme-choice" data-theme="contrast" onclick="setBoardTheme('contrast')"><span class="theme-swatch contrast"></span><span>High Contrast</span></button>
+        </div>
+      </div>
+
+      <div class="account-divider"></div>
+
+      <div class="account-section">
+        <h3 class="account-section-title">Piece Style</h3>
+        <div class="settings-row">
+          <div><strong>Unicode pieces</strong><span>Current DigiChess pieces</span></div>
+          <select class="timer-select" id="pieceStyleSelect" disabled>
+            <option>Unicode pieces</option>
+            <option>More styles coming soon</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="account-divider"></div>
+
+      <div class="account-section">
+        <h3 class="account-section-title">Sound Settings</h3>
+        <label class="settings-toggle"><span>Move sounds</span><input type="checkbox" id="settingMoveSounds" onchange="updateSettingFromInput('moveSounds', this.checked)" /></label>
+        <label class="settings-toggle"><span>Capture, check and checkmate sounds</span><input type="checkbox" id="settingAlertSounds" onchange="updateSettingFromInput('alertSounds', this.checked)" /></label>
+      </div>
+
+      <div class="account-divider"></div>
+
+      <div class="account-section">
+        <h3 class="account-section-title">Timer Preferences</h3>
+        <div class="settings-row">
+          <div><strong>Default local timer</strong><span>Applies to new local and AI games only</span></div>
+          <select class="timer-select" id="settingDefaultTimer" onchange="updateSettingFromInput('defaultTimer', this.value)">
+            <option value="60">1 min</option>
+            <option value="180">3 min</option>
+            <option value="300">5 min</option>
+            <option value="600">10 min</option>
+            <option value="0">No limit</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="account-divider"></div>
+
+      <div class="account-section">
+        <h3 class="account-section-title">Gameplay Preferences</h3>
+        <label class="settings-toggle"><span>Legal move highlights</span><input type="checkbox" id="settingLegalHighlights" onchange="updateSettingFromInput('legalHighlights', this.checked)" /></label>
+        <label class="settings-toggle"><span>Last move highlight</span><input type="checkbox" id="settingLastMoveHighlight" onchange="updateSettingFromInput('lastMoveHighlight', this.checked)" /></label>
+        <label class="settings-toggle"><span>Board coordinates</span><input type="checkbox" id="settingCoordinates" onchange="updateSettingFromInput('coordinates', this.checked)" /></label>
+        <label class="settings-toggle"><span>Auto-flip board when playing black online</span><input type="checkbox" id="settingAutoFlipBlack" onchange="updateSettingFromInput('autoFlipBlack', this.checked)" /></label>
+      </div>
+
+      <div class="account-divider"></div>
+
+      <div class="account-section">
+        <h3 class="account-section-title">Account &amp; Display</h3>
+        <label class="settings-toggle settings-disabled"><span>Show username on board <small>Coming soon</small></span><input type="checkbox" disabled /></label>
+        <label class="settings-toggle"><span>Compact mode</span><input type="checkbox" id="settingCompactMode" onchange="updateSettingFromInput('compactMode', this.checked)" /></label>
+      </div>
+
+      <div class="modal-actions" style="margin-top:16px;">
+        <button class="btn btn-ghost" onclick="resetUserSettings()">Reset Defaults</button>
+        <button class="btn btn-primary" onclick="closeModal('settingsModal')">Done</button>
       </div>
     </div>
   </div>

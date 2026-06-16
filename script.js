@@ -116,6 +116,20 @@ let stockfishReady = false;
 let stockfishRequestId = 0;
 let stockfishPending = null;
 let aiDifficulty = 'medium';
+const SETTINGS_STORAGE_KEY = 'digichessUserSettings';
+const DEFAULT_USER_SETTINGS = {
+  boardTheme: 'classic',
+  pieceStyle: 'unicode',
+  moveSounds: true,
+  alertSounds: true,
+  defaultTimer: 600,
+  legalHighlights: true,
+  lastMoveHighlight: true,
+  coordinates: true,
+  autoFlipBlack: true,
+  compactMode: false
+};
+let userSettings = { ...DEFAULT_USER_SETTINGS };
 
 // Timer state
 let timerWhiteSecs  = 600;
@@ -270,6 +284,11 @@ function initGame() {
 function newGame() {
   closeModal('gameOverModal');
   stopTimers();
+  if (gameMode !== 'friend') {
+    timerLimitSecs = Number(userSettings.defaultTimer) || 0;
+    const timerPreset = document.getElementById('timerPreset');
+    if (timerPreset) timerPreset.value = String(timerLimitSecs);
+  }
   resetTimers(true);
   // In online games orientation is set by setupGameListener before initGame is called.
   // For local games (pvp / ai) always start with white at the bottom.
@@ -301,7 +320,7 @@ function renderBoard() {
       sq.dataset.col = dispCol;
 
       // Last move highlight
-      if (lastMove) {
+      if (userSettings.lastMoveHighlight && lastMove) {
         if ((lastMove.from.row === dispRow && lastMove.from.col === dispCol) ||
             (lastMove.to.row   === dispRow && lastMove.to.col   === dispCol)) {
           sq.classList.add((dispRow + dispCol) % 2 === 0 ? 'last-move-light' : 'last-move-dark');
@@ -314,7 +333,7 @@ function renderBoard() {
       }
 
       // Legal moves
-      const lm = legalMoves.find(m => m.row === dispRow && m.col === dispCol);
+      const lm = userSettings.legalHighlights ? legalMoves.find(m => m.row === dispRow && m.col === dispCol) : null;
       if (lm) {
         sq.classList.add(board[dispRow][dispCol] ? 'legal-capture' : 'legal-move');
       }
@@ -1203,6 +1222,10 @@ function flipBoard() {
   renderBoard();
 }
 
+function shouldAutoFlipForBlack(color) {
+  return userSettings.autoFlipBlack && color === 'b';
+}
+
 /* ══════════════════════════════════════════
    UI UPDATES
 ══════════════════════════════════════════ */
@@ -1628,6 +1651,9 @@ function getAudioCtx() {
 }
 
 function playSound(type) {
+  if ((type === 'move' || type === 'promote') && !userSettings.moveSounds) return;
+  if ((type === 'capture' || type === 'check' || type === 'checkmate') && !userSettings.alertSounds) return;
+
   try {
     const ctx = getAudioCtx();
     const osc = ctx.createOscillator();
@@ -1684,6 +1710,164 @@ function playSound(type) {
   } catch (_) {
     // Audio not available — fail silently
   }
+}
+
+/* ══════════════════════════════════════════
+   USER SETTINGS
+   Stored locally so preferences survive refresh without touching Firebase.
+══════════════════════════════════════════ */
+const BOARD_THEMES = {
+  classic: {
+    '--sq-light': '#f0d9b5',
+    '--sq-dark': '#b58863',
+    '--sq-light-hl': '#cdd26a',
+    '--sq-dark-hl': '#aaa23b',
+    '--sq-selected': '#7fc97f'
+  },
+  green: {
+    '--sq-light': '#d6e8c7',
+    '--sq-dark': '#6b9b58',
+    '--sq-light-hl': '#c7dc67',
+    '--sq-dark-hl': '#82aa43',
+    '--sq-selected': '#5db370'
+  },
+  blue: {
+    '--sq-light': '#d8e6f3',
+    '--sq-dark': '#5f7fa3',
+    '--sq-light-hl': '#b9d46a',
+    '--sq-dark-hl': '#6f9a49',
+    '--sq-selected': '#73a8d8'
+  },
+  purple: {
+    '--sq-light': '#eadcf4',
+    '--sq-dark': '#8261a6',
+    '--sq-light-hl': '#d3cc68',
+    '--sq-dark-hl': '#9a9140',
+    '--sq-selected': '#a77bd1'
+  },
+  contrast: {
+    '--sq-light': '#f8f8f8',
+    '--sq-dark': '#202020',
+    '--sq-light-hl': '#ffef65',
+    '--sq-dark-hl': '#b6a800',
+    '--sq-selected': '#00c853'
+  }
+};
+
+function loadUserSettings() {
+  try {
+    const stored = JSON.parse(localStorage.getItem(SETTINGS_STORAGE_KEY) || '{}');
+    userSettings = normalizeUserSettings({ ...DEFAULT_USER_SETTINGS, ...stored });
+  } catch (_) {
+    userSettings = { ...DEFAULT_USER_SETTINGS };
+  }
+  if (gameMode !== 'friend') {
+    timerLimitSecs = userSettings.defaultTimer;
+    timerWhiteSecs = timerLimitSecs;
+    timerBlackSecs = timerLimitSecs;
+  }
+  applyUserSettings(false);
+}
+
+function normalizeUserSettings(settings) {
+  const timer = Number(settings.defaultTimer);
+  return {
+    ...DEFAULT_USER_SETTINGS,
+    ...settings,
+    boardTheme: BOARD_THEMES[settings.boardTheme] ? settings.boardTheme : DEFAULT_USER_SETTINGS.boardTheme,
+    pieceStyle: 'unicode',
+    defaultTimer: [0, 60, 180, 300, 600].includes(timer) ? timer : DEFAULT_USER_SETTINGS.defaultTimer,
+    moveSounds: settings.moveSounds !== false,
+    alertSounds: settings.alertSounds !== false,
+    legalHighlights: settings.legalHighlights !== false,
+    lastMoveHighlight: settings.lastMoveHighlight !== false,
+    coordinates: settings.coordinates !== false,
+    autoFlipBlack: settings.autoFlipBlack !== false,
+    compactMode: settings.compactMode === true
+  };
+}
+
+function saveUserSettings() {
+  localStorage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(userSettings));
+}
+
+function applyUserSettings(shouldRender = true) {
+  const theme = BOARD_THEMES[userSettings.boardTheme] || BOARD_THEMES.classic;
+  Object.entries(theme).forEach(([name, value]) => {
+    document.documentElement.style.setProperty(name, value);
+  });
+
+  document.body?.classList.toggle('hide-legal-moves', !userSettings.legalHighlights);
+  document.body?.classList.toggle('hide-last-move', !userSettings.lastMoveHighlight);
+  document.body?.classList.toggle('hide-coordinates', !userSettings.coordinates);
+  document.body?.classList.toggle('compact-mode', userSettings.compactMode);
+
+  const timerPreset = document.getElementById('timerPreset');
+  if (timerPreset && gameMode !== 'friend') timerPreset.value = String(userSettings.defaultTimer);
+
+  syncSettingsControls();
+  if (shouldRender) {
+    renderCoords();
+    renderBoard();
+    updateTimerControls();
+  }
+}
+
+function syncSettingsControls() {
+  document.querySelectorAll('.theme-choice').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.theme === userSettings.boardTheme);
+  });
+
+  setChecked('settingMoveSounds', userSettings.moveSounds);
+  setChecked('settingAlertSounds', userSettings.alertSounds);
+  setChecked('settingLegalHighlights', userSettings.legalHighlights);
+  setChecked('settingLastMoveHighlight', userSettings.lastMoveHighlight);
+  setChecked('settingCoordinates', userSettings.coordinates);
+  setChecked('settingAutoFlipBlack', userSettings.autoFlipBlack);
+  setChecked('settingCompactMode', userSettings.compactMode);
+
+  const defaultTimer = document.getElementById('settingDefaultTimer');
+  if (defaultTimer) defaultTimer.value = String(userSettings.defaultTimer);
+}
+
+function setChecked(id, value) {
+  const el = document.getElementById(id);
+  if (el) el.checked = !!value;
+}
+
+function openSettingsModal() {
+  const dropdown = document.getElementById('profileDropdown');
+  if (dropdown) dropdown.style.display = 'none';
+  syncSettingsControls();
+  document.getElementById('settingsModal').style.display = 'flex';
+}
+
+function setBoardTheme(theme) {
+  userSettings.boardTheme = BOARD_THEMES[theme] ? theme : 'classic';
+  saveUserSettings();
+  applyUserSettings();
+}
+
+function updateSettingFromInput(key, value) {
+  if (!(key in DEFAULT_USER_SETTINGS)) return;
+  userSettings[key] = key === 'defaultTimer' ? Number(value) : value;
+  userSettings = normalizeUserSettings(userSettings);
+  if (key === 'defaultTimer' && gameMode !== 'friend') {
+    timerLimitSecs = userSettings.defaultTimer;
+    resetTimers(true);
+  }
+  saveUserSettings();
+  applyUserSettings();
+}
+
+function resetUserSettings() {
+  userSettings = { ...DEFAULT_USER_SETTINGS };
+  if (gameMode !== 'friend') {
+    timerLimitSecs = userSettings.defaultTimer;
+    resetTimers(true);
+  }
+  saveUserSettings();
+  applyUserSettings();
 }
 
 /* ══════════════════════════════════════════
@@ -2825,7 +3009,7 @@ async function acceptMatchRequest(reqKey, fromUid, fromUsername) {
   // We reuse the existing friend game flow — just auto-create and share code
   // by opening the friend modal pre-filled as host
   myColor        = 'b';
-  isFlipped      = true;   // host is black → black at bottom
+  isFlipped      = shouldAutoFlipForBlack('b');   // host is black → black at bottom when enabled
   hostUsername   = currentUsername;
   joinerUsername = fromUsername;
 
@@ -3644,7 +3828,7 @@ function findMatch() {
       const names    = gameData.usernames || {};
 
       myColor          = colors[uid] || (gameData.players?.host === uid ? 'b' : 'w');
-      isFlipped        = (myColor === 'b');
+      isFlipped = shouldAutoFlipForBlack(myColor);
       gameMode         = 'friend';
       friendJoinCode   = code;
       playerId         = uid;
@@ -3732,7 +3916,7 @@ function findMatch() {
       // Assign colors by UID sort — deterministic, same on both sides
       const iAmBlack = uid < opponentUid;
       myColor        = iAmBlack ? 'b' : 'w';
-      isFlipped      = (myColor === 'b');
+      isFlipped = shouldAutoFlipForBlack(myColor);
       gameMode       = 'friend';
       playerId       = uid;
       friendJoinCode = generateJoinCode();
@@ -3958,7 +4142,7 @@ function createFriendGame() {
   playerId       = currentUser.uid;
   friendJoinCode = generateJoinCode();
   myColor        = resolvedColor;
-  isFlipped      = (resolvedColor === 'b'); // host's pieces at the bottom
+  isFlipped = shouldAutoFlipForBlack(resolvedColor); // host's pieces at the bottom
   gameMode       = 'friend';
   hostUsername   = currentUsername;
 
@@ -4027,7 +4211,7 @@ function joinFriendGame() {
     const hostColor   = gameData.hostColor || 'b';
     const joinerColor = hostColor === 'b' ? 'w' : 'b';
     myColor        = joinerColor;
-    isFlipped      = (joinerColor === 'b'); // joiner's pieces at the bottom
+    isFlipped = shouldAutoFlipForBlack(joinerColor); // joiner's pieces at the bottom
     gameMode       = 'friend';
     joinerUsername = sanitizePlayerName(currentUsername);
     hostUsername   = playerNameForSlot(gameData, 'host', 'Player');
@@ -4107,7 +4291,7 @@ function setupGameListener(code, closeOnStart) {
 
       // White (joiner): isFlipped = false → white at bottom
       // Black (host):   isFlipped = true  → black at bottom
-      isFlipped = (localMyColor === 'b');
+      isFlipped = shouldAutoFlipForBlack(localMyColor);
 
       // Write our own username into the game data so the opponent can read it.
       const mySlot = playerSlotForUid(gameData, currentUser?.uid) || (localMyColor === 'b' ? 'host' : 'joiner');
@@ -4157,7 +4341,7 @@ function setupGameListener(code, closeOnStart) {
       const modalOpen = document.getElementById('gameOverModal').style.display !== 'none';
       if (modalOpen) {
         closeModal('gameOverModal');
-        isFlipped = (localMyColor === 'b');
+        isFlipped = shouldAutoFlipForBlack(localMyColor);
         initGame();
         updateGameInfo();
         return;
@@ -4314,7 +4498,7 @@ function acceptRematch() {
   };
   friendGameRef.update(resetData).then(() => {
     closeModal('gameOverModal');
-    isFlipped = (myColor === 'b');
+    isFlipped = shouldAutoFlipForBlack(myColor);
     initGame();
     updateGameInfo();
   });
@@ -4352,6 +4536,9 @@ function copyJoinCode() {
 ══════════════════════════════════════════ */
 // Generate a unique player ID
 playerId = generatePlayerId();
+
+// Load saved display, sound, timer and gameplay preferences before drawing the board.
+loadUserSettings();
 
 // Initialize the game
 initGame();
