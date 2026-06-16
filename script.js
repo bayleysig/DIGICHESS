@@ -129,6 +129,7 @@ let opponentUsername = null;       // the other player's username in a friend ga
 let hostUsername     = null;       // username of who created the game
 let joinerUsername   = null;       // username of who joined the game
 let onlinePlayerUidByColor = { w: null, b: null };
+let mirroredInGameFriendRequests = new Set();
 
 /* ══════════════════════════════════════════
    MULTIPLAYER HELPER FUNCTIONS (defined early)
@@ -1089,7 +1090,7 @@ function getOnlinePlayerUidForDisplayColor(color) {
 
 async function addFriendFromPlayerSlot(color) {
   if (!currentUser) { openAuthModal('signup'); return; }
-  if (!db) return;
+  if (!db || !friendGameRef) return;
 
   const targetUid = getOnlinePlayerUidForDisplayColor(color);
   const nameEl = document.getElementById(`info${color}Player`);
@@ -1113,7 +1114,12 @@ async function addFriendFromPlayerSlot(color) {
       addBtn.title = 'Sending request...';
     }
 
-    await db.ref(`users/${targetUid}/friendRequests/${currentUser.uid}`).set(true);
+    await friendGameRef.child(`friendRequests/${currentUser.uid}`).set({
+      toUid: targetUid,
+      fromUsername: sanitizePlayerName(currentUsername),
+      toUsername: sanitizePlayerName(targetName),
+      sentAt: firebase.database.ServerValue.TIMESTAMP
+    });
 
     if (addBtn) {
       addBtn.title = `Friend request sent to ${targetName}`;
@@ -2685,7 +2691,24 @@ function gameSnapshotSignature(gameData) {
     timeControl: gameData.timeControl ?? null,
     timerWhiteSecs: Number.isFinite(gameData.timerWhiteSecs) ? gameData.timerWhiteSecs : null,
     timerBlackSecs: Number.isFinite(gameData.timerBlackSecs) ? gameData.timerBlackSecs : null,
-    timerLimitSecs: Number.isFinite(gameData.timerLimitSecs) ? gameData.timerLimitSecs : null
+    timerLimitSecs: Number.isFinite(gameData.timerLimitSecs) ? gameData.timerLimitSecs : null,
+    friendRequests: gameData.friendRequests || null
+  });
+}
+
+function mirrorInGameFriendRequests(gameData) {
+  if (!currentUser || !db || !gameData?.friendRequests) return;
+
+  Object.entries(gameData.friendRequests).forEach(([fromUid, request]) => {
+    if (!request || request.toUid !== currentUser.uid || fromUid === currentUser.uid) return;
+    const requestKey = `${fromUid}:${request.sentAt || 'pending'}`;
+    if (mirroredInGameFriendRequests.has(requestKey)) return;
+    mirroredInGameFriendRequests.add(requestKey);
+
+    db.ref(`users/${currentUser.uid}/friendRequests/${fromUid}`).set(true).catch(err => {
+      mirroredInGameFriendRequests.delete(requestKey);
+      console.error('Failed to mirror in-game friend request:', err);
+    });
   });
 }
 
@@ -3151,6 +3174,7 @@ function setupGameListener(code, closeOnStart) {
     }
 
     syncLocalNamesFromGame(gameData);
+    mirrorInGameFriendRequests(gameData);
 
     // ── Waiting for second player ──
     if (!gameStarted) {
@@ -3316,6 +3340,7 @@ function exitFriendGame() {
   joinerUsername   = null;
   opponentUsername = null;
   onlinePlayerUidByColor = { w: null, b: null };
+  mirroredInGameFriendRequests = new Set();
   newGame();
 }
 
