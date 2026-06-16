@@ -193,7 +193,7 @@ function initGame() {
 function newGame() {
   closeModal('gameOverModal');
   stopTimers();
-  resetTimers();
+  resetTimers(true);
   // In online games orientation is set by setupGameListener before initGame is called.
   // For local games (pvp / ai) always start with white at the bottom.
   if (gameMode !== 'friend') {
@@ -1089,13 +1089,18 @@ function startTimers() {
   updateTimerActiveState();
 }
 
+function canEditTimerSettings() {
+  return gameMode !== 'friend';
+}
+
 function stopTimers() {
   timersRunning = false;
   clearInterval(timerInterval);
   timerInterval = null;
 }
 
-function resetTimers() {
+function resetTimers(force = false) {
+  if (!force && !canEditTimerSettings()) return;
   stopTimers();
   timerWhiteSecs = timerLimitSecs;
   timerBlackSecs = timerLimitSecs;
@@ -1104,9 +1109,26 @@ function resetTimers() {
 }
 
 function changeTimerPreset() {
+  if (!canEditTimerSettings()) return;
   const val = parseInt(document.getElementById('timerPreset').value);
   timerLimitSecs = val;
   resetTimers();
+}
+
+function updateTimerControls() {
+  const controls = document.getElementById('timerControls');
+  const startBtn = document.getElementById('timerStartBtn');
+  const resetBtn = document.getElementById('timerResetBtn');
+  const preset   = document.getElementById('timerPreset');
+  const editable = canEditTimerSettings();
+
+  if (controls) controls.style.display = editable ? 'flex' : 'none';
+  if (startBtn) startBtn.disabled = !editable;
+  if (resetBtn) resetBtn.disabled = !editable;
+  if (preset) {
+    preset.disabled = !editable;
+    if (editable) preset.value = String(timerLimitSecs);
+  }
 }
 
 function updateTimerDisplays() {
@@ -1121,6 +1143,7 @@ function updateTimerDisplays() {
 function updateTimerActiveState() {
   document.getElementById('timerWhite').classList.toggle('active', timersRunning && currentTurn === 'w');
   document.getElementById('timerBlack').classList.toggle('active', timersRunning && currentTurn === 'b');
+  updateTimerControls();
 }
 
 function formatTime(secs) {
@@ -2086,6 +2109,7 @@ async function acceptMatchRequest(reqKey, fromUid, fromUsername) {
     usernames:   { host: sanitizePlayerName(currentUsername) },
     colors:      { [playerId]: 'b' },
     hostColor:   'b',
+    timeControl: QP_TIME_SECS,
     board:       boardToFirebase(INITIAL_BOARD),
     currentTurn: 'w',
     moveHistory: [],
@@ -2096,6 +2120,9 @@ async function acceptMatchRequest(reqKey, fromUid, fromUsername) {
     capturedByWhite: [],
     capturedByBlack: [],
     halfMoveClock: 0,
+    timerWhiteSecs: QP_TIME_SECS,
+    timerBlackSecs: QP_TIME_SECS,
+    timerLimitSecs: QP_TIME_SECS,
     createdAt:   firebase.database.ServerValue.TIMESTAMP
   };
 
@@ -2522,6 +2549,9 @@ function gameStateForFirebase() {
     capturedByWhite: capturedByWhite,
     capturedByBlack: capturedByBlack,
     halfMoveClock:   halfMoveClock,
+    timerWhiteSecs:  timerWhiteSecs,
+    timerBlackSecs:  timerBlackSecs,
+    timerLimitSecs:  timerLimitSecs,
     lastMoveBy:      currentUser?.uid || null,
     updatedAt:       firebase.database.ServerValue.TIMESTAMP
   };
@@ -2575,7 +2605,10 @@ function gameSnapshotSignature(gameData) {
     capturedByWhite: gameData.capturedByWhite || [],
     capturedByBlack: gameData.capturedByBlack || [],
     halfMoveClock: Number.isFinite(gameData.halfMoveClock) ? gameData.halfMoveClock : null,
-    timeControl: gameData.timeControl ?? null
+    timeControl: gameData.timeControl ?? null,
+    timerWhiteSecs: Number.isFinite(gameData.timerWhiteSecs) ? gameData.timerWhiteSecs : null,
+    timerBlackSecs: Number.isFinite(gameData.timerBlackSecs) ? gameData.timerBlackSecs : null,
+    timerLimitSecs: Number.isFinite(gameData.timerLimitSecs) ? gameData.timerLimitSecs : null
   });
 }
 
@@ -2612,6 +2645,11 @@ function applySyncedGameState(gameData) {
   capturedByWhite = Array.isArray(gameData.capturedByWhite) ? gameData.capturedByWhite : Object.values(gameData.capturedByWhite || {});
   capturedByBlack = Array.isArray(gameData.capturedByBlack) ? gameData.capturedByBlack : Object.values(gameData.capturedByBlack || {});
   halfMoveClock   = Number.isFinite(gameData.halfMoveClock) ? gameData.halfMoveClock : moveHistory.length;
+  timerLimitSecs  = Number.isFinite(gameData.timerLimitSecs) ? gameData.timerLimitSecs
+                   : Number.isFinite(gameData.timeControl) ? gameData.timeControl
+                   : timerLimitSecs;
+  timerWhiteSecs  = Number.isFinite(gameData.timerWhiteSecs) ? gameData.timerWhiteSecs : timerWhiteSecs;
+  timerBlackSecs  = Number.isFinite(gameData.timerBlackSecs) ? gameData.timerBlackSecs : timerBlackSecs;
 
   return true;
 }
@@ -2816,6 +2854,9 @@ function findMatch() {
         capturedByWhite: [],
         capturedByBlack: [],
         halfMoveClock: 0,
+        timerWhiteSecs: QP_TIME_SECS,
+        timerBlackSecs: QP_TIME_SECS,
+        timerLimitSecs: QP_TIME_SECS,
         quickPlay:   true,
         createdAt:   firebase.database.ServerValue.TIMESTAMP
       };
@@ -2928,6 +2969,9 @@ function createFriendGame() {
     capturedByWhite: [],
     capturedByBlack: [],
     halfMoveClock:  0,
+    timerWhiteSecs: tcSecs,
+    timerBlackSecs: tcSecs,
+    timerLimitSecs: tcSecs,
     createdAt:      firebase.database.ServerValue.TIMESTAMP
   };
 
@@ -3231,7 +3275,10 @@ function acceptRematch() {
     castlingRights: { wK: true, wQ: true, bK: true, bQ: true },
     capturedByWhite: [],
     capturedByBlack: [],
-    halfMoveClock:  0
+    halfMoveClock:  0,
+    timerWhiteSecs: timerLimitSecs,
+    timerBlackSecs: timerLimitSecs,
+    timerLimitSecs: timerLimitSecs
   };
   friendGameRef.update(resetData).then(() => {
     closeModal('gameOverModal');
