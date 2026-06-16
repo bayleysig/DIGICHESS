@@ -1127,6 +1127,7 @@ async function updatePlayerSlotButton(color, playerName, myName) {
   try {
     const oppUid = getOnlinePlayerUidForDisplayColor(color);
     if (!oppUid || oppUid === currentUser.uid) return;
+    if (await isGuestPlayer(oppUid, playerName)) return;
 
     if (hasPendingInGameFriendRequest(oppUid)) {
       addBtn.disabled = true;
@@ -1148,6 +1149,17 @@ async function updatePlayerSlotButton(color, playerName, myName) {
     }
   } catch (_) {
     // fail silently
+  }
+}
+
+async function isGuestPlayer(uid, displayName = '') {
+  if (!uid) return false;
+  if (String(displayName || '').toLowerCase().startsWith('guest_')) return true;
+  try {
+    const guestSnap = await db.ref(`users/${uid}/isGuest`).once('value');
+    return guestSnap.val() === true;
+  } catch (_) {
+    return false;
   }
 }
 
@@ -1183,6 +1195,11 @@ async function addFriendFromPlayerSlot(color) {
   const friendBtn = document.getElementById(`alreadyFriend${color}`);
 
   if (!targetUid || targetUid === currentUser.uid) return;
+  if (currentUser.isAnonymous || await isGuestPlayer(targetUid, targetName)) {
+    if (addBtn) addBtn.style.display = 'none';
+    if (friendBtn) friendBtn.style.display = 'none';
+    return;
+  }
 
   try {
     const alreadySnap = await db.ref(`users/${currentUser.uid}/friends/${targetUid}`).once('value');
@@ -1358,7 +1375,9 @@ function dismissAIBanner() {
    MODAL HELPERS
 ══════════════════════════════════════════ */
 function closeModal(id) {
-  document.getElementById(id).style.display = 'none';
+  const modal = document.getElementById(id);
+  if (!modal) return;
+  modal.style.display = 'none';
   // If the Play Online modal is closed while matchmaking, cancel the search
   if (id === 'friendModal' && matchmakingListener) {
     cancelMatchmaking();
@@ -1526,6 +1545,12 @@ function openAuthModal(defaultTab) {
   if (signUpBtn) { signUpBtn.disabled = false; signUpBtn.textContent = 'Sign Up'; }
   if (signInBtn) { signInBtn.disabled = false; signInBtn.textContent = 'Sign In'; }
   document.getElementById('authModal').style.display = 'flex';
+}
+
+function openGuestSignupModal() {
+  const dropdown = document.getElementById('profileDropdown');
+  if (dropdown) dropdown.style.display = 'none';
+  openAuthModal('signup');
 }
 
 function switchAuthTab(tab) {
