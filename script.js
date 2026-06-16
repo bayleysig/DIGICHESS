@@ -117,6 +117,8 @@ let friendGameRef   = null;        // reference to current game in Firebase
 let gameListener    = null;        // listener reference for unsubscribe
 let myColor         = null;        // 'w' or 'b' when playing with friend
 let gameSyncPollId  = null;        // backup poller for missed RTDB updates
+let gameFieldListeners = [];       // child listeners for turn / moveHistory changes
+let gameFieldDebounceId = null;    // debounce rapid multi-field Firebase updates
 
 // Auth state
 let currentUser     = null;        // Firebase Auth user object
@@ -2522,6 +2524,35 @@ function gameStateForFirebase() {
   };
 }
 
+function normalizeMoveHistory(mh) {
+  if (!mh) return [];
+  return Array.isArray(mh) ? mh : Object.values(mh);
+}
+
+function boardsEqual(a, b) {
+  if (!a || !b || a.length !== 8 || b.length !== 8) return false;
+  for (let r = 0; r < 8; r++) {
+    if (!a[r] || !b[r] || a[r].length !== 8 || b[r].length !== 8) return false;
+    for (let c = 0; c < 8; c++) {
+      if (a[r][c] !== b[r][c]) return false;
+    }
+  }
+  return true;
+}
+
+/** True when Firebase state differs from local board — never skip applying in this case. */
+function needsApplyGameState(gameData) {
+  if (!gameData) return false;
+  const remoteBoard = boardFromFirebase(gameData.board);
+  if (!remoteBoard) return true;
+  const remoteTurn  = gameData.currentTurn || 'w';
+  const remoteMoves = normalizeMoveHistory(gameData.moveHistory);
+  if (remoteTurn !== currentTurn) return true;
+  if (remoteMoves.length !== moveHistory.length) return true;
+  if (!boardsEqual(remoteBoard, board)) return true;
+  return false;
+}
+
 function gameSnapshotSignature(gameData) {
   if (!gameData) return '';
   return JSON.stringify({
@@ -2529,7 +2560,7 @@ function gameSnapshotSignature(gameData) {
     usernames: gameData.usernames || null,
     board: gameData.board || null,
     currentTurn: gameData.currentTurn || 'w',
-    moveHistory: gameData.moveHistory || [],
+    moveHistory: normalizeMoveHistory(gameData.moveHistory),
     gameOver: !!gameData.gameOver,
     gameOverTitle: gameData.gameOverTitle || null,
     gameOverSub: gameData.gameOverSub || null,
@@ -2552,6 +2583,15 @@ function stopGameSyncPoller() {
   }
 }
 
+function detachGameFieldListeners() {
+  gameFieldListeners.forEach(({ ref, event, handler }) => ref.off(event, handler));
+  gameFieldListeners = [];
+  if (gameFieldDebounceId) {
+    clearTimeout(gameFieldDebounceId);
+    gameFieldDebounceId = null;
+  }
+}
+
 function applySyncedGameState(gameData) {
   const parsedBoard = boardFromFirebase(gameData.board);
   if (!parsedBoard || parsedBoard.length !== 8 || parsedBoard.some(r => !r || r.length !== 8)) {
@@ -2561,9 +2601,7 @@ function applySyncedGameState(gameData) {
 
   board           = parsedBoard;
   currentTurn     = gameData.currentTurn || 'w';
-  moveHistory     = Array.isArray(gameData.moveHistory)
-    ? gameData.moveHistory
-    : Object.values(gameData.moveHistory || {});
+  moveHistory     = normalizeMoveHistory(gameData.moveHistory);
   gameOver        = !!gameData.gameOver;
   lastMove        = gameData.lastMove || null;
   enPassantSq     = gameData.enPassantSq || null;
@@ -2651,6 +2689,17 @@ function findMatch() {
       hostUsername     = sanitizePlayerName(names.host, 'Player');
       joinerUsername   = sanitizePlayerName(names.joiner, currentUsername || 'Player');
       opponentUsername = myColor === 'w' ? hostUsername : joinerUsername;
+
+      // Register this player's slot in Firebase so security rules allow their moves.
+      // The creator already wrote host; the joiner (non-creator) must write joiner slot.
+      const mySlotInGame = gameData.players?.host === uid ? 'host' : 'joiner';
+      if (mySlotInGame === 'joiner' && !gameData.players?.joiner) {
+        const slotUpdates = {};
+        slotUpdates[`games/${code}/players/joiner`]     = uid;
+        slotUpdates[`games/${code}/usernames/joiner`]   = sanitizePlayerName(currentUsername || 'Player');
+        slotUpdates[`games/${code}/colors/${uid}`]      = myColor;
+        await db.ref().update(slotUpdates);
+      }
 
       document.getElementById('matchmakingText').textContent = 'Found opponent! Loading…';
       document.getElementById('friendModal').style.display   = 'none';
@@ -2924,11 +2973,14 @@ function joinFriendGame() {
 
 function setupGameListener(code, closeOnStart) {
   if (!db) { console.error('Firebase not initialized'); return; }
+  console.log(`[SETUP] called — code=${code} myColor=${myColor} closeOnStart=${closeOnStart}`);
 
   const previousRef = friendGameRef;
-  if (gameListener && previousRef) previousRef.off('value', gameListener);
+  if (gameListener && previousRef) { console.log('[SETUP] detaching old listener'); previousRef.off('value', gameListener); }
   stopGameSyncPoller();
+  detachGameFieldListeners();
   friendGameRef = db.ref(`games/${code}`);
+  console.log('[SETUP] listening on:', friendGameRef.toString());
 
   // Capture myColor at the time the listener is set up so async Firebase
   // callbacks always use the correct value, even if the global is later changed.
@@ -2944,8 +2996,14 @@ function setupGameListener(code, closeOnStart) {
     const playerCount = gameData.players ? Object.keys(gameData.players).length : 1;
     const signature   = gameSnapshotSignature(gameData);
 
-    if (gameStarted && signature === lastProcessedSignature) return;
-    lastProcessedSignature = signature;
+    console.log(`[SNAP] fired — gameStarted=${gameStarted} turn=${gameData.currentTurn} dupSig=${gameStarted && signature === lastProcessedSignature}`);
+    if (gameStarted && signature === lastProcessedSignature && !needsApplyGameState(gameData)) {
+      console.log('[SNAP] skipped — duplicate signature');
+      return;
+    }
+    if (gameStarted && signature === lastProcessedSignature && needsApplyGameState(gameData)) {
+      console.log('[SNAP] forcing apply — local state behind Firebase');
+    }
 
     syncLocalNamesFromGame(gameData);
 
@@ -2953,6 +3011,7 @@ function setupGameListener(code, closeOnStart) {
     if (!gameStarted) {
       if (!closeOnStart && playerCount < 2) return;
 
+      lastProcessedSignature = signature;
       gameStarted = true;
       // Hide the modal directly — avoids closeModal() triggering cancelMatchmaking()
       const fModal = document.getElementById('friendModal');
@@ -2998,8 +3057,11 @@ function setupGameListener(code, closeOnStart) {
       return;
     }
 
+    lastProcessedSignature = signature;
+
     // ── In-progress: apply opponent's move ──
-    if (!applySyncedGameState(gameData)) return;
+    console.log(`[SNAP] in-progress — Firebase turn: ${gameData.currentTurn}, myColor: ${myColor}`);
+    if (!applySyncedGameState(gameData)) { console.error("[SNAP] invalid board"); return; }
 
     // ── Rematch accepted: game was reset — close modal and restart ──
     if (!gameData.gameOver && !gameData.gameOverTitle) {
@@ -3018,8 +3080,7 @@ function setupGameListener(code, closeOnStart) {
     updateStatusBar();
     updateCapturedPieces();
     updateGameInfo();
-
-    // Show game over modal if opponent triggered it (resign/checkmate synced)
+    updateTimerActiveState();
     if (gameData.gameOver && gameData.gameOverTitle) {
       const modalAlreadyOpen = document.getElementById('gameOverModal').style.display !== 'none';
       if (!modalAlreadyOpen) {
@@ -3043,7 +3104,27 @@ function setupGameListener(code, closeOnStart) {
     }
   };
 
+  console.log('[SETUP] attaching .on(value) listener');
   gameListener = friendGameRef.on('value', processGameSnapshot);
+  console.log('[SETUP] listener attached, gameListener=', !!gameListener);
+
+  // Dedicated listeners on turn / moveHistory — backup when the root value event is missed
+  const onRemoteFieldChange = () => {
+    if (!friendGameRef) return;
+    clearTimeout(gameFieldDebounceId);
+    gameFieldDebounceId = setTimeout(() => {
+      friendGameRef.once('value').then(processGameSnapshot).catch(err => {
+        console.error('[SNAP] field listener fetch failed:', err);
+      });
+    }, 50);
+  };
+  const turnRef = friendGameRef.child('currentTurn');
+  turnRef.on('value', onRemoteFieldChange);
+  gameFieldListeners.push({ ref: turnRef, event: 'value', handler: onRemoteFieldChange });
+  const histRef = friendGameRef.child('moveHistory');
+  histRef.on('child_added', onRemoteFieldChange);
+  gameFieldListeners.push({ ref: histRef, event: 'child_added', handler: onRemoteFieldChange });
+
   gameSyncPollId = setInterval(() => {
     if (!friendGameRef || gameMode !== 'friend') return;
     friendGameRef.once('value').then(processGameSnapshot).catch(err => {
@@ -3053,20 +3134,22 @@ function setupGameListener(code, closeOnStart) {
 }
 
 function syncMoveToFriend(notation) {
-  if (!db) { console.warn('syncMove: no db'); return; }
-  if (!friendGameRef) { console.warn('syncMove: no friendGameRef'); return; }
-  if (gameMode !== 'friend') { console.warn('syncMove: gameMode is', gameMode); return; }
-  
+  if (!db) { console.warn('[SYNC] no db'); return; }
+  if (!friendGameRef) { console.warn('[SYNC] no friendGameRef'); return; }
+  if (gameMode !== 'friend') { console.warn('[SYNC] gameMode is', gameMode); return; }
+
   // Only sync after our own move (the turn just switched away from us)
   const weJustMoved = (myColor === 'w' && currentTurn === 'b') || (myColor === 'b' && currentTurn === 'w');
-  if (!weJustMoved) return;
+  console.log(`[SYNC] myColor=${myColor} currentTurn=${currentTurn} weJustMoved=${weJustMoved}`);
+  if (!weJustMoved) { console.warn('[SYNC] skipped — not our move'); return; }
 
   const updates = gameStateForFirebase();
+  console.log('[SYNC] writing to Firebase, currentTurn in payload:', updates.currentTurn);
 
   friendGameRef.update(updates).then(() => {
-    console.log('syncMove: success, turn now', currentTurn);
+    console.log('[SYNC] success ✓');
   }).catch(err => {
-    console.error('syncMove FAILED:', err.code, err.message);
+    console.error('[SYNC] FAILED — Firebase rejected write:', err.code, err.message);
   });
 }
 
@@ -3075,6 +3158,7 @@ function exitFriendGame() {
     friendGameRef.off('value', gameListener);
   }
   stopGameSyncPoller();
+  detachGameFieldListeners();
   hideInGameChat();
   friendJoinCode   = null;
   playerId         = null;
