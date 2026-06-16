@@ -940,6 +940,24 @@ body.online-timer-locked .timer-controls {
 }
 .friend-row:last-child { border-bottom: none; }
 
+.friend-profile-trigger {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  background: none;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.friend-profile-trigger:hover .friend-name {
+  color: var(--green-bright);
+}
+
 .friend-avatar {
   width: 28px;
   height: 28px;

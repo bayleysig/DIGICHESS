@@ -1740,11 +1740,15 @@ async function openStatsModal() {
   if (dropdown) dropdown.style.display = 'none';
   if (!currentUser || currentUser.isAnonymous) return;
 
-  const sub = document.getElementById('statsModalSub');
-  if (sub) sub.textContent = `Stats for ${currentUsername || 'Player'}`;
-
   document.getElementById('statsModal').style.display = 'flex';
-  await loadStatsModal();
+  await loadStatsModal(currentUser.uid, currentUsername || 'Player', true);
+}
+
+async function openFriendStatsModal(friendUid, friendName) {
+  if (!currentUser || !db) return;
+  closeModal('friendsModal');
+  document.getElementById('statsModal').style.display = 'flex';
+  await loadStatsModal(friendUid, friendName || 'Player', false);
 }
 
 function emptyStats() {
@@ -1760,13 +1764,19 @@ function emptyStats() {
   };
 }
 
-async function loadStatsModal() {
-  if (!currentUser || !db) return;
-  const statsSnap = await db.ref(`users/${currentUser.uid}/stats`).once('value');
+async function loadStatsModal(uid = currentUser?.uid, displayName = currentUsername || 'Player', publishOwn = false) {
+  if (!uid || !db) return;
+  const sub = document.getElementById('statsModalSub');
+  if (sub) sub.textContent = `Stats for ${sanitizePlayerName(displayName, 'Player')}`;
+
+  const statsSnap = await db.ref(`users/${uid}/stats`).once('value');
   const stats = { ...emptyStats(), ...(statsSnap.val() || {}) };
-  publishLeaderboardStats(stats).catch(err => console.warn('Unable to publish leaderboard stats:', err));
-  const friendsSnap = await db.ref(`users/${currentUser.uid}/friends`).once('value');
-  const currentFriends = Object.keys(friendsSnap.val() || {}).length;
+  if (publishOwn) publishLeaderboardStats(stats).catch(err => console.warn('Unable to publish leaderboard stats:', err));
+  let currentFriends = '-';
+  try {
+    const friendsSnap = await db.ref(`users/${uid}/friends`).once('value');
+    currentFriends = Object.keys(friendsSnap.val() || {}).length;
+  } catch (_) {}
   const decisiveGames = stats.wins + stats.losses;
   const winRate = decisiveGames > 0 ? Math.round((stats.wins / decisiveGames) * 100) : 0;
   const avgFriends = stats.onlineMatches > 0 ? (stats.friendsMadeInMatches / stats.onlineMatches).toFixed(2) : '0.00';
@@ -2053,13 +2063,18 @@ async function loadFriendsModal() {
       const row = document.createElement('div');
       row.className = 'friend-row';
       row.innerHTML = `
-        <span class="friend-avatar">${fname.charAt(0).toUpperCase()}</span>
-        <span class="friend-name">${fname}</span>
+        <button class="friend-profile-trigger" type="button" title="View ${fname}'s statistics">
+          <span class="friend-avatar">${fname.charAt(0).toUpperCase()}</span>
+          <span class="friend-name">${fname}</span>
+        </button>
         <div class="friend-actions">
-          <button class="btn btn-sm btn-primary" onclick="sendMatchRequest('${fuid}','${fname}')">Challenge</button>
-          <button class="btn btn-sm btn-ghost btn-danger-ghost" onclick="removeFriend('${fuid}','${fname}')">Remove</button>
+          <button class="btn btn-sm btn-primary friend-challenge-btn">Challenge</button>
+          <button class="btn btn-sm btn-ghost btn-danger-ghost friend-remove-btn">Remove</button>
         </div>
       `;
+      row.querySelector('.friend-profile-trigger')?.addEventListener('click', () => openFriendStatsModal(fuid, fname));
+      row.querySelector('.friend-challenge-btn')?.addEventListener('click', () => sendMatchRequest(fuid, fname));
+      row.querySelector('.friend-remove-btn')?.addEventListener('click', () => removeFriend(fuid, fname));
       friendsList.appendChild(row);
     }
   }
