@@ -131,6 +131,7 @@ let joinerUsername   = null;       // username of who joined the game
 let onlinePlayerUidByColor = { w: null, b: null };
 let currentGameFriendRequests = {};
 let currentGameFriendAccepts = {};
+let currentGameFriendRemovals = {};
 let mirroredInGameFriendRequests = new Set();
 let mirroredInGameFriendAccepts = new Set();
 
@@ -1074,10 +1075,6 @@ async function updatePlayerSlotButton(color, playerName, myName) {
     const oppUid = getOnlinePlayerUidForDisplayColor(color);
     if (!oppUid || oppUid === currentUser.uid) return;
 
-    if (hasAcceptedInGameFriendship(oppUid)) {
-      friendBtn.style.display = 'inline-flex';
-      return;
-    }
     if (hasPendingInGameFriendRequest(oppUid)) {
       addBtn.disabled = true;
       addBtn.title = `Friend request sent to ${playerName}`;
@@ -1088,6 +1085,8 @@ async function updatePlayerSlotButton(color, playerName, myName) {
 
     const friendSnap = await db.ref(`users/${currentUser.uid}/friends/${oppUid}`).once('value');
     if (friendSnap.exists()) {
+      friendBtn.style.display = 'inline-flex';
+    } else if (hasAcceptedInGameFriendship(oppUid) && !hasRemovedInGameFriendship(oppUid)) {
       friendBtn.style.display = 'inline-flex';
     } else {
       addBtn.disabled = false;
@@ -1112,6 +1111,12 @@ function hasAcceptedInGameFriendship(targetUid) {
   const acceptedByMe = currentGameFriendAccepts?.[currentUser?.uid];
   const acceptedByThem = currentGameFriendAccepts?.[targetUid];
   return acceptedByMe?.toUid === targetUid || acceptedByThem?.toUid === currentUser?.uid;
+}
+
+function hasRemovedInGameFriendship(targetUid) {
+  const removedByMe = currentGameFriendRemovals?.[currentUser?.uid];
+  const removedByThem = currentGameFriendRemovals?.[targetUid];
+  return removedByMe?.toUid === targetUid || removedByThem?.toUid === currentUser?.uid;
 }
 
 async function addFriendFromPlayerSlot(color) {
@@ -1140,12 +1145,16 @@ async function addFriendFromPlayerSlot(color) {
       addBtn.title = 'Sending request...';
     }
 
-    await friendGameRef.child(`friendRequests/${currentUser.uid}`).set({
+    const requestUpdates = {};
+    requestUpdates[`friendRequests/${currentUser.uid}`] = {
       toUid: targetUid,
       fromUsername: sanitizePlayerName(currentUsername),
       toUsername: sanitizePlayerName(targetName),
       sentAt: firebase.database.ServerValue.TIMESTAMP
-    });
+    };
+    requestUpdates[`friendRemovals/${currentUser.uid}`] = null;
+    requestUpdates[`friendRemovals/${targetUid}`] = null;
+    await friendGameRef.update(requestUpdates);
 
     if (addBtn) {
       addBtn.title = `Friend request sent to ${targetName}`;
@@ -2075,6 +2084,29 @@ async function removeFriend(fuid, fname) {
   } catch (_) {
     await db.ref(`users/${myUid}/friends/${fuid}`).remove();
   }
+
+  if (friendGameRef && (onlinePlayerUidByColor.w === fuid || onlinePlayerUidByColor.b === fuid)) {
+    currentGameFriendRemovals[myUid] = { toUid: fuid };
+    delete currentGameFriendAccepts[myUid];
+    delete currentGameFriendAccepts[fuid];
+    delete currentGameFriendRequests[myUid];
+    delete currentGameFriendRequests[fuid];
+
+    const gameUpdates = {};
+    gameUpdates[`friendRemovals/${myUid}`] = {
+      toUid: fuid,
+      removedAt: firebase.database.ServerValue.TIMESTAMP
+    };
+    gameUpdates[`friendAccepts/${myUid}`] = null;
+    gameUpdates[`friendAccepts/${fuid}`] = null;
+    gameUpdates[`friendRequests/${myUid}`] = null;
+    gameUpdates[`friendRequests/${fuid}`] = null;
+    friendGameRef.update(gameUpdates).catch(err => {
+      console.warn('Unable to sync in-game friend removal:', err);
+    });
+    updateGameInfo();
+  }
+
   loadFriendsModal();
 }
 
@@ -2710,6 +2742,7 @@ function syncLocalNamesFromGame(gameData) {
   onlinePlayerUidByColor = { w: null, b: null };
   currentGameFriendRequests = gameData.friendRequests || {};
   currentGameFriendAccepts = gameData.friendAccepts || {};
+  currentGameFriendRemovals = gameData.friendRemovals || {};
 
   if (gameData.colors) {
     Object.entries(gameData.colors).forEach(([uid, color]) => {
@@ -2802,7 +2835,8 @@ function gameSnapshotSignature(gameData) {
     timerBlackSecs: Number.isFinite(gameData.timerBlackSecs) ? gameData.timerBlackSecs : null,
     timerLimitSecs: Number.isFinite(gameData.timerLimitSecs) ? gameData.timerLimitSecs : null,
     friendRequests: gameData.friendRequests || null,
-    friendAccepts: gameData.friendAccepts || null
+    friendAccepts: gameData.friendAccepts || null,
+    friendRemovals: gameData.friendRemovals || null
   });
 }
 
@@ -3478,6 +3512,7 @@ function exitFriendGame() {
   onlinePlayerUidByColor = { w: null, b: null };
   currentGameFriendRequests = {};
   currentGameFriendAccepts = {};
+  currentGameFriendRemovals = {};
   mirroredInGameFriendRequests = new Set();
   mirroredInGameFriendAccepts = new Set();
   newGame();
