@@ -129,6 +129,7 @@ let opponentUsername = null;       // the other player's username in a friend ga
 let hostUsername     = null;       // username of who created the game
 let joinerUsername   = null;       // username of who joined the game
 let onlinePlayerUidByColor = { w: null, b: null };
+let currentGameFriendRequests = {};
 let mirroredInGameFriendRequests = new Set();
 
 /* ══════════════════════════════════════════
@@ -1074,6 +1075,11 @@ async function updatePlayerSlotButton(color, playerName, myName) {
     const friendSnap = await db.ref(`users/${currentUser.uid}/friends/${oppUid}`).once('value');
     if (friendSnap.exists()) {
       friendBtn.style.display = 'inline-flex';
+    } else if (hasPendingInGameFriendRequest(oppUid)) {
+      addBtn.disabled = true;
+      addBtn.title = `Friend request sent to ${playerName}`;
+      addBtn.classList.add('request-sent');
+      addBtn.style.display = 'inline-flex';
     } else {
       addBtn.disabled = false;
       addBtn.title = `Add ${playerName}`;
@@ -1086,6 +1092,11 @@ async function updatePlayerSlotButton(color, playerName, myName) {
 
 function getOnlinePlayerUidForDisplayColor(color) {
   return color === 'White' ? onlinePlayerUidByColor.w : onlinePlayerUidByColor.b;
+}
+
+function hasPendingInGameFriendRequest(targetUid) {
+  const request = currentGameFriendRequests?.[currentUser?.uid];
+  return !!request && request.toUid === targetUid;
 }
 
 async function addFriendFromPlayerSlot(color) {
@@ -1894,8 +1905,12 @@ async function loadFriendsModal() {
   reqSection.style.display = reqUids.length > 0 ? 'block' : 'none';
 
   for (const ruid of reqUids) {
-    const nameSnap = await db.ref(`users/${ruid}/username`).once('value');
-    const rname = nameSnap.val() || ruid;
+    const reqData = requests[ruid];
+    let rname = typeof reqData === 'object' && reqData?.fromUsername ? reqData.fromUsername : ruid;
+    try {
+      const nameSnap = await db.ref(`users/${ruid}/username`).once('value');
+      rname = nameSnap.val() || rname;
+    } catch (_) {}
     const row = document.createElement('div');
     row.className = 'friend-row';
     row.innerHTML = `
@@ -2532,15 +2547,28 @@ function startFriendRequestNotifListener() {
 
   db.ref(`users/${uid}/friendRequests`).on('child_added', snap => {
     if (!snap.exists()) return;
-    db.ref(`users/${snap.key}/username`).once('value').then(nameSnap => {
-      const fromUsername = nameSnap.val() || 'Someone';
-      const fromUid      = snap.key;
+    const reqData = snap.val();
+    const fromUid = snap.key;
+    const fallbackName = typeof reqData === 'object' && reqData?.fromUsername ? reqData.fromUsername : 'Someone';
+    db.ref(`users/${fromUid}/username`).once('value').then(nameSnap => {
+      const fromUsername = nameSnap.val() || fallbackName;
       pushNotif({
         type:        'friend',
         icon:        '👤',
         title:       `<strong>${fromUsername}</strong> sent you a friend request`,
         actions: [
           { label: 'Accept',  cls: 'btn-primary', onclick: `acceptFriendRequest('${fromUid}','${fromUsername}')` },
+          { label: 'Decline', cls: 'btn-ghost',   onclick: `declineFriendRequest('${fromUid}')` }
+        ],
+        autoDismiss: 0
+      });
+    }).catch(() => {
+      pushNotif({
+        type:        'friend',
+        icon:        '👤',
+        title:       `<strong>${fallbackName}</strong> sent you a friend request`,
+        actions: [
+          { label: 'Accept',  cls: 'btn-primary', onclick: `acceptFriendRequest('${fromUid}','${fallbackName}')` },
           { label: 'Decline', cls: 'btn-ghost',   onclick: `declineFriendRequest('${fromUid}')` }
         ],
         autoDismiss: 0
@@ -2601,6 +2629,7 @@ function syncLocalNamesFromGame(gameData) {
   const mySlot = playerSlotForUid(gameData, currentUser?.uid);
   const otherSlot = mySlot === 'host' ? 'joiner' : mySlot === 'joiner' ? 'host' : null;
   onlinePlayerUidByColor = { w: null, b: null };
+  currentGameFriendRequests = gameData.friendRequests || {};
 
   if (gameData.colors) {
     Object.entries(gameData.colors).forEach(([uid, color]) => {
@@ -2705,7 +2734,10 @@ function mirrorInGameFriendRequests(gameData) {
     if (mirroredInGameFriendRequests.has(requestKey)) return;
     mirroredInGameFriendRequests.add(requestKey);
 
-    db.ref(`users/${currentUser.uid}/friendRequests/${fromUid}`).set(true).catch(err => {
+    db.ref(`users/${currentUser.uid}/friendRequests/${fromUid}`).set({
+      fromUsername: sanitizePlayerName(request.fromUsername),
+      sentAt: request.sentAt || firebase.database.ServerValue.TIMESTAMP
+    }).catch(err => {
       mirroredInGameFriendRequests.delete(requestKey);
       console.error('Failed to mirror in-game friend request:', err);
     });
@@ -3340,6 +3372,7 @@ function exitFriendGame() {
   joinerUsername   = null;
   opponentUsername = null;
   onlinePlayerUidByColor = { w: null, b: null };
+  currentGameFriendRequests = {};
   mirroredInGameFriendRequests = new Set();
   newGame();
 }
