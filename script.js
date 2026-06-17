@@ -4993,14 +4993,12 @@ function setupGameListener(code, closeOnStart) {
 
   let gameStarted = false;
   let lastProcessedSignature = null;
-  let lastProcessedLiveSignature = null;
 
   const processGameSnapshot = snapshot => {
     if (!snapshot.exists()) return;
 
     const gameData    = snapshot.val();
     const playerCount = gameData.players ? Object.keys(gameData.players).length : 1;
-    const liveSignature = liveGameStateSignature(gameData);
     const signature   = gameSnapshotSignature(gameData);
 
     console.log(`[SNAP] fired — gameStarted=${gameStarted} turn=${gameData.currentTurn} dupSig=${gameStarted && signature === lastProcessedSignature}`);
@@ -5028,7 +5026,6 @@ function setupGameListener(code, closeOnStart) {
       if (!closeOnStart && playerCount < 2) return;
 
       lastProcessedSignature = signature;
-      lastProcessedLiveSignature = liveSignature;
       gameStarted = true;
       onlinePositionSnapshots = [];
       onlineReviewIndex = null;
@@ -5079,37 +5076,33 @@ function setupGameListener(code, closeOnStart) {
       return;
     }
 
-    const liveStateChanged = liveSignature !== lastProcessedLiveSignature || needsApplyGameState(gameData);
     lastProcessedSignature = signature;
 
-    if (liveStateChanged) {
-      lastProcessedLiveSignature = liveSignature;
-      // ── In-progress: apply opponent's move ──
-      console.log(`[SNAP] in-progress — Firebase turn: ${gameData.currentTurn}, myColor: ${myColor}`);
-      if (!applySyncedGameState(gameData)) { console.error("[SNAP] invalid board"); return; }
+    // ── In-progress: apply opponent's move ──
+    console.log(`[SNAP] in-progress — Firebase turn: ${gameData.currentTurn}, myColor: ${myColor}`);
+    if (!applySyncedGameState(gameData)) { console.error("[SNAP] invalid board"); return; }
 
-      // ── Rematch accepted: game was reset — close modal and restart ──
-      if (!gameData.gameOver && !gameData.gameOverTitle) {
-        const modalOpen = document.getElementById('gameOverModal').style.display !== 'none';
-        if (modalOpen) {
-          closeModal('gameOverModal');
-          activeGameOverModalKey = null;
-          dismissedGameOverKeys = new Set();
-          dismissedUnkeyedOnlineGameOver = false;
-          isFlipped = shouldAutoFlipForBlack(localMyColor);
-          initGame();
-          updateGameInfo();
-          return;
-        }
+    // ── Rematch accepted: game was reset — close modal and restart ──
+    if (!gameData.gameOver && !gameData.gameOverTitle) {
+      const modalOpen = document.getElementById('gameOverModal').style.display !== 'none';
+      if (modalOpen) {
+        closeModal('gameOverModal');
+        activeGameOverModalKey = null;
+        dismissedGameOverKeys = new Set();
+        dismissedUnkeyedOnlineGameOver = false;
+        isFlipped = shouldAutoFlipForBlack(localMyColor);
+        initGame();
+        updateGameInfo();
+        return;
       }
-
-      renderBoard();
-      renderMoveHistory();
-      updateStatusBar();
-      updateCapturedPieces();
-      updateGameInfo();
-      updateTimerActiveState();
     }
+
+    renderBoard();
+    renderMoveHistory();
+    updateStatusBar();
+    updateCapturedPieces();
+    updateGameInfo();
+    updateTimerActiveState();
 
     if (gameData.gameOver && gameData.gameOverTitle) {
       const modalAlreadyOpen = document.getElementById('gameOverModal').style.display !== 'none';
