@@ -4590,6 +4590,10 @@ function findMatch(isRanked = false) {
       if (!isFreshMatchmakingEntry(opponentData)) return;
       if ((opponentData.ranked === true) !== isRanked) return;
 
+      // Only one side is allowed to create the room. Without this, both players
+      // can claim each other at the same time and end up listening to different games.
+      if (uid > opponentUid) return;
+
       paired = true; // claim synchronously before any await
 
       let result;
