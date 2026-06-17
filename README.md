@@ -1,4 +1,4 @@
-DigiChess
+# ♟️ DigiChess
 
 DigiChess is a modern online chess platform that combines competitive gameplay, AI opponents, player profiles, leaderboards, statistics tracking, and social features in a clean, professional interface.
 
