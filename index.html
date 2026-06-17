@@ -459,10 +459,13 @@
        GAME OVER MODAL
   ══════════════════════════════════════ -->
   <div class="modal-overlay" id="gameOverModal" style="display:none;">
-    <div class="modal">
-      <div class="modal-big-icon" id="gameOverIcon">♚</div>
-      <h2 class="modal-title" id="gameOverTitle">Game Over</h2>
-      <p class="modal-sub" id="gameOverSub"></p>
+    <div class="modal" id="gameOverDialog">
+      <div id="gameOverSimpleContent">
+        <div class="modal-big-icon" id="gameOverIcon">♚</div>
+        <h2 class="modal-title" id="gameOverTitle">Game Over</h2>
+        <p class="modal-sub" id="gameOverSub"></p>
+      </div>
+      <div class="game-result-summary" id="gameResultSummary" style="display:none;"></div>
       <div class="modal-actions">
         <button class="btn btn-primary" id="playAgainBtn" onclick="newGame()">Play Again</button>
         <button class="btn btn-primary" id="rematchBtn" onclick="requestRematch()" style="display:none;">Request Rematch</button>

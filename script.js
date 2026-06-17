@@ -1088,10 +1088,252 @@ function triggerGameOver(reason, lastNotation, forcedLoserColor = null) {
       timerBlackSecs:  timerBlackSecs,
       timerLimitSecs:  timerLimitSecs,
       drawOffer:       null,
+      endedAt:         firebase.database.ServerValue.TIMESTAMP,
       rematchRequest:  null           // clear any prior rematch on new game-over
     }).catch(err => {
       console.error('Failed to sync game-over state:', err.code, err.message);
     });
+  }
+}
+
+function resetGameOverModalLayout() {
+  const dialog = document.getElementById('gameOverDialog');
+  const simple = document.getElementById('gameOverSimpleContent');
+  const summary = document.getElementById('gameResultSummary');
+  if (dialog) dialog.classList.remove('result-summary-modal');
+  if (simple) simple.style.display = 'block';
+  if (summary) {
+    summary.style.display = 'none';
+    summary.innerHTML = '';
+  }
+}
+
+function formatMatchDuration(startedAt, endedAt) {
+  const start = Number(startedAt);
+  const end = Number(endedAt);
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) return null;
+  const totalSeconds = Math.max(0, Math.round((end - start) / 1000));
+  const mins = Math.floor(totalSeconds / 60);
+  const secs = totalSeconds % 60;
+  return mins > 0 ? `${mins}m ${secs.toString().padStart(2, '0')}s` : `${secs}s`;
+}
+
+function getResultReasonLabel(reason) {
+  switch (reason) {
+    case 'checkmate': return 'Checkmate';
+    case 'resign': return 'Resignation';
+    case 'timeout': return 'Timeout';
+    case 'stalemate': return 'Stalemate';
+    case 'agreedDraw': return 'Draw by agreement';
+    default: return 'Game ended';
+  }
+}
+
+function getResultTitle(gameData, myDisplayColor) {
+  const isDraw = gameData.gameOverWinner === 'Draw' || gameData.gameOverReason === 'stalemate' || gameData.gameOverReason === 'agreedDraw';
+  if (isDraw) return 'Draw';
+  return gameData.gameOverWinner === myDisplayColor ? 'Victory' : 'Defeat';
+}
+
+function getOnlineOpponentDetails(gameData) {
+  const colors = gameData?.colors || {};
+  const opponentUid = Object.keys(colors).find(uid => uid !== currentUser?.uid && (colors[uid] === 'w' || colors[uid] === 'b'));
+  const opponentSlot = playerSlotForUid(gameData, opponentUid);
+  const opponentName = opponentSlot ? playerNameForSlot(gameData, opponentSlot, opponentUsername || 'Opponent') : (opponentUsername || 'Opponent');
+  return { uid: opponentUid, name: opponentName };
+}
+
+function ratingSummaryFromResult(result, fallbackName) {
+  if (!result) return null;
+  return {
+    name: sanitizePlayerName(result.username || fallbackName, fallbackName),
+    oldElo: normalizeElo(result.oldElo),
+    newElo: normalizeElo(result.newElo),
+    change: Number(result.change) || 0
+  };
+}
+
+function getRankedEloSummary(gameData, myDisplayColor, opponentUid, opponentName) {
+  if (!gameData?.ranked) return null;
+
+  const eloResults = gameData.eloResults || {};
+  const myStoredResult = ratingSummaryFromResult(eloResults[currentUser?.uid], currentUsername || 'You');
+  const opponentStoredResult = ratingSummaryFromResult(eloResults[opponentUid], opponentName || 'Opponent');
+  if (myStoredResult || opponentStoredResult) {
+    return {
+      mine: myStoredResult,
+      opponent: opponentStoredResult
+    };
+  }
+
+  const playerElos = gameData.playerElos || {};
+  const myOldElo = normalizeElo(playerElos[currentUser?.uid]);
+  const opponentOldElo = normalizeElo(playerElos[opponentUid]);
+  if (gameData.gameOverReason === 'agreedDraw') {
+    return {
+      mine: { name: sanitizePlayerName(currentUsername, 'You'), oldElo: myOldElo, newElo: myOldElo, change: 0 },
+      opponent: { name: sanitizePlayerName(opponentName, 'Opponent'), oldElo: opponentOldElo, newElo: opponentOldElo, change: 0 }
+    };
+  }
+
+  const actualScore = scoreForRankedResult(gameData, myDisplayColor);
+  if (actualScore === null) return null;
+  return {
+    mine: {
+      name: sanitizePlayerName(currentUsername, 'You'),
+      ...calculateEloChange(myOldElo, opponentOldElo, actualScore)
+    },
+    opponent: {
+      name: sanitizePlayerName(opponentName, 'Opponent'),
+      ...calculateEloChange(opponentOldElo, myOldElo, 1 - actualScore)
+    }
+  };
+}
+
+function buildGameResultSummary(gameData) {
+  if (!gameData?.gameOver || !gameData.gameOverTitle || gameMode !== 'friend') return null;
+  const myDisplayColor = myColor === 'w' ? 'White' : myColor === 'b' ? 'Black' : null;
+  if (!myDisplayColor) return null;
+
+  const opponent = getOnlineOpponentDetails(gameData);
+  const isDraw = gameData.gameOverWinner === 'Draw' || gameData.gameOverReason === 'stalemate' || gameData.gameOverReason === 'agreedDraw';
+  const didWin = !isDraw && gameData.gameOverWinner === myDisplayColor;
+  const resultType = isDraw ? 'draw' : didWin ? 'win' : 'loss';
+  const title = getResultTitle(gameData, myDisplayColor);
+  const subtitle = isDraw
+    ? 'Both players share the result.'
+    : didWin
+      ? `You defeated ${sanitizePlayerName(opponent.name, 'Opponent')}.`
+      : `${sanitizePlayerName(opponent.name, 'Opponent')} defeated you.`;
+  const moves = normalizeMoveHistory(gameData.moveHistory).length;
+
+  return {
+    resultType,
+    title,
+    subtitle,
+    matchType: gameData.ranked ? 'Ranked' : 'Unranked',
+    reason: getResultReasonLabel(gameData.gameOverReason),
+    moves,
+    duration: formatMatchDuration(gameData.createdAt, gameData.endedAt),
+    color: myDisplayColor,
+    opponentName: sanitizePlayerName(opponent.name, 'Opponent'),
+    ratings: getRankedEloSummary(gameData, myDisplayColor, opponent.uid, opponent.name)
+  };
+}
+
+function ratingChangeClass(change) {
+  if (change > 0) return 'positive';
+  if (change < 0) return 'negative';
+  return 'neutral';
+}
+
+function renderRatingRow(label, rating) {
+  if (!rating) {
+    return `
+      <div class="rating-row">
+        <span class="rating-name">${escapeHtml(label)}</span>
+        <span class="rating-flow">Waiting for update</span>
+        <span class="rating-change neutral">0</span>
+      </div>`;
+  }
+  const signedChange = rating.change > 0 ? `+${rating.change}` : `${rating.change}`;
+  return `
+    <div class="rating-row">
+      <span class="rating-name">${escapeHtml(rating.name || label)}</span>
+      <span class="rating-flow">${rating.oldElo} &rarr; ${rating.newElo}</span>
+      <span class="rating-change ${ratingChangeClass(rating.change)}">${signedChange}</span>
+    </div>`;
+}
+
+function renderGameResultModal(summary) {
+  const dialog = document.getElementById('gameOverDialog');
+  const simple = document.getElementById('gameOverSimpleContent');
+  const container = document.getElementById('gameResultSummary');
+  if (!dialog || !simple || !container || !summary) return false;
+
+  dialog.classList.add('result-summary-modal');
+  simple.style.display = 'none';
+  container.style.display = 'flex';
+  const ratingHtml = summary.ratings ? `
+    <div class="rating-panel">
+      <div class="rating-panel-title">Rating Change</div>
+      ${renderRatingRow('You', summary.ratings.mine)}
+      ${renderRatingRow(summary.opponentName, summary.ratings.opponent)}
+    </div>` : '';
+  const detailCards = [
+    ['Match', summary.matchType],
+    ['Ended By', summary.reason],
+    ['Moves', summary.moves],
+    summary.duration ? ['Duration', summary.duration] : null,
+    ['You Played', summary.color],
+    ['Opponent', summary.opponentName]
+  ].filter(Boolean).map(([label, value]) => `
+      <div class="result-card">
+        <span class="result-card-label">${escapeHtml(label)}</span>
+        <span class="result-card-value">${escapeHtml(String(value))}</span>
+      </div>`).join('');
+
+  container.innerHTML = `
+    <div class="result-hero">
+      <span class="result-badge ${summary.resultType}">${escapeHtml(summary.resultType)}</span>
+      <h2 class="result-title">${escapeHtml(summary.title)}</h2>
+      <p class="result-subtitle">${escapeHtml(summary.subtitle)}</p>
+    </div>
+    <div class="result-cards">
+      ${detailCards}
+    </div>
+    ${ratingHtml}`;
+  return true;
+}
+
+function showRankedResultModal(summary) {
+  return renderGameResultModal(summary);
+}
+
+function showUnrankedResultModal(summary) {
+  return renderGameResultModal(summary);
+}
+
+function showOnlineResultModal(gameData, rematchPending = false, modalKey = null) {
+  const summary = buildGameResultSummary(gameData);
+  const rendered = summary
+    ? (summary.matchType === 'Ranked' ? showRankedResultModal(summary) : showUnrankedResultModal(summary))
+    : false;
+  if (!summary || !rendered) {
+    showGameOverModal(
+      gameData.gameOverTitle,
+      gameData.gameOverSub || '',
+      gameData.gameOverIcon || '♚',
+      rematchPending,
+      modalKey
+    );
+    return;
+  }
+
+  activeGameOverModalKey = modalKey;
+  document.getElementById('gameOverModal').style.display = 'flex';
+  document.getElementById('infoStatus').textContent = 'Ended';
+  document.getElementById('infoStatus').className = 'status-ended';
+
+  const playAgainBtn = document.getElementById('playAgainBtn');
+  const rematchBtn = document.getElementById('rematchBtn');
+  const dismissBtn = document.getElementById('gameOverDismissBtn');
+  if (playAgainBtn) playAgainBtn.style.display = 'none';
+  if (dismissBtn) dismissBtn.style.display = 'inline-flex';
+  if (rematchBtn) {
+    rematchBtn.style.display = 'inline-flex';
+    rematchBtn.disabled = false;
+    if (gameData.rematchRequest === currentUser?.uid) {
+      rematchBtn.textContent = 'Waiting for opponent...';
+      rematchBtn.disabled = true;
+      rematchBtn.onclick = requestRematch;
+    } else if (rematchPending) {
+      rematchBtn.textContent = 'Accept Rematch';
+      rematchBtn.onclick = acceptRematch;
+    } else {
+      rematchBtn.textContent = 'Request Rematch';
+      rematchBtn.onclick = requestRematch;
+    }
   }
 }
 
@@ -1101,6 +1343,7 @@ function triggerGameOver(reason, lastNotation, forcedLoserColor = null) {
  */
 function showGameOverModal(title, sub, icon, rematchPending = false, modalKey = null) {
   activeGameOverModalKey = modalKey;
+  resetGameOverModalLayout();
   setTimeout(() => {
     document.getElementById('gameOverIcon').textContent  = icon;
     document.getElementById('gameOverTitle').textContent = title;
@@ -1149,6 +1392,7 @@ function showDrawOfferModal(offer) {
   const offerKey = `${offer.fromUid}_${offer.requestedAt || 'pending'}`;
   if (drawOfferModalKey === offerKey) return;
   drawOfferModalKey = offerKey;
+  resetGameOverModalLayout();
 
   setTimeout(() => {
     document.getElementById('gameOverIcon').textContent  = '½';
@@ -1220,6 +1464,7 @@ function acceptDrawOffer() {
     gameOverSub:     sub,
     gameOverIcon:    icon,
     drawOffer:       null,
+    endedAt:         firebase.database.ServerValue.TIMESTAMP,
     timerWhiteSecs:  timerWhiteSecs,
     timerBlackSecs:  timerBlackSecs,
     timerLimitSecs:  timerLimitSecs,
@@ -2587,10 +2832,12 @@ async function applyRankedEloChange(gameData, gameKey) {
   const actualScore = scoreForRankedResult(gameData, myDisplayColor);
   if (actualScore === null) return;
   const opponentElo = normalizeElo(playerElos[opponentUid]);
+  let appliedEloResult = null;
 
   await db.ref(`users/${currentUser.uid}/stats`).transaction(current => {
     const stats = { ...emptyStats(), ...(current || {}) };
     const eloResult = calculateEloChange(stats.elo, opponentElo, actualScore);
+    appliedEloResult = eloResult;
     stats.elo = eloResult.newElo;
     stats.rankedMatches = (Number(stats.rankedMatches) || 0) + 1;
     if (actualScore === 1) stats.rankedWins = (Number(stats.rankedWins) || 0) + 1;
@@ -2602,6 +2849,16 @@ async function applyRankedEloChange(gameData, gameKey) {
       publishLeaderboardStats({ ...emptyStats(), ...(result.snapshot.val() || {}) }).catch(err => {
         console.warn('Unable to publish Elo leaderboard update:', err);
       });
+      if (friendGameRef && appliedEloResult) {
+        friendGameRef.child(`eloResults/${currentUser.uid}`).set({
+          ...appliedEloResult,
+          username: sanitizePlayerName(currentUsername, 'Player'),
+          color: myColor,
+          updatedAt: firebase.database.ServerValue.TIMESTAMP
+        }).catch(err => {
+          console.warn('Unable to publish Elo result to match summary:', err);
+        });
+      }
     }
   });
 }
@@ -3954,6 +4211,9 @@ function gameSnapshotSignature(gameData) {
     gameOverTitle: gameData.gameOverTitle || null,
     gameOverSub: gameData.gameOverSub || null,
     gameOverIcon: gameData.gameOverIcon || null,
+    gameOverReason: gameData.gameOverReason || null,
+    gameOverWinner: gameData.gameOverWinner || null,
+    endedAt: gameData.endedAt || null,
     rematchRequest: gameData.rematchRequest || null,
     lastMove: gameData.lastMove || null,
     enPassantSq: gameData.enPassantSq || null,
@@ -3971,7 +4231,8 @@ function gameSnapshotSignature(gameData) {
     drawOffer: gameData.drawOffer || null,
     ranked: gameData.ranked === true,
     matchType: gameData.matchType || null,
-    playerElos: gameData.playerElos || null
+    playerElos: gameData.playerElos || null,
+    eloResults: gameData.eloResults || null
   });
 }
 
@@ -4795,6 +5056,8 @@ function setupGameListener(code, closeOnStart) {
     updateTimerActiveState();
     if (gameData.gameOver && gameData.gameOverTitle) {
       const modalAlreadyOpen = document.getElementById('gameOverModal').style.display !== 'none';
+      const summaryVisible = document.getElementById('gameResultSummary')?.style.display !== 'none';
+      const summaryHasPendingRating = document.getElementById('gameResultSummary')?.textContent?.includes('Waiting for update');
       const gameOverKey = onlineGameOverKey(gameData);
       if (dismissedUnkeyedOnlineGameOver && gameOverKey) {
         dismissedGameOverKeys.add(gameOverKey);
@@ -4804,21 +5067,16 @@ function setupGameListener(code, closeOnStart) {
         activeGameOverModalKey = gameOverKey;
       }
       const shouldReplaceDrawOffer = gameData.gameOverReason === 'agreedDraw' && (drawOfferModalKey || modalAlreadyOpen);
+      const shouldReplaceSimpleWithSummary = modalAlreadyOpen && !summaryVisible;
       if (dismissedGameOverKeys.has(gameOverKey) && !shouldReplaceDrawOffer) {
         stopTimers();
         return;
       }
-      if (!modalAlreadyOpen || shouldReplaceDrawOffer) {
+      if (!modalAlreadyOpen || shouldReplaceDrawOffer || shouldReplaceSimpleWithSummary || (summaryHasPendingRating && gameData.eloResults)) {
         drawOfferModalKey = null;
         // Opponent triggered game over — show modal on our screen too
         const rematchPending = !!(gameData.rematchRequest && gameData.rematchRequest !== currentUser?.uid);
-        showGameOverModal(
-          gameData.gameOverTitle,
-          gameData.gameOverSub   || '',
-          gameData.gameOverIcon  || '♚',
-          rematchPending,
-          gameOverKey
-        );
+        showOnlineResultModal(gameData, rematchPending, gameOverKey);
         stopTimers();
       } else if (gameData.rematchRequest && gameData.rematchRequest !== currentUser?.uid) {
         // Modal is already open — just flip the button to "Accept Rematch"
@@ -4953,6 +5211,8 @@ function acceptRematch() {
     gameOverReason: null,
     gameOverWinner: null,
     rematchRequest: null,
+    endedAt:        null,
+    eloResults:     null,
     drawOffer:      null,
     lastMove:       null,
     enPassantSq:    null,
@@ -4996,7 +5256,7 @@ function copyJoinCode() {
 ══════════════════════════════════════════ */
 ['gameOverModal', 'friendModal'].forEach(id => {
   document.getElementById(id)?.addEventListener('click', function(e) {
-    if (e.target === this && id !== 'friendModal') closeModal(id);
+    if (e.target === this && id === 'gameOverModal') dismissGameOverModal();
   });
 });
 
