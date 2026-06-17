@@ -319,6 +319,38 @@ function newGame() {
   initGame();
 }
 
+function handleBoardNewGameClick() {
+  if (gameMode === 'friend' && gameOver) {
+    closeModal('gameOverModal');
+    exitFriendGame();
+    openPlayOnlineModal();
+    return;
+  }
+  newGame();
+}
+
+function updateBoardControls() {
+  const isOnline = gameMode === 'friend';
+  const showOnlineNewGame = isOnline && gameOver;
+  const newGameBtn = document.getElementById('boardNewGameBtn');
+  const controlIds = ['boardUndoBtn', 'resetBoardViewBtn', 'boardFlipBtn', 'drawOfferBtn', 'boardResignBtn'];
+
+  if (newGameBtn) {
+    newGameBtn.style.display = !isOnline || showOnlineNewGame ? 'inline-flex' : 'none';
+  }
+
+  controlIds.forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (id === 'resetBoardViewBtn') {
+      el.style.display = isOnline && !gameOver ? 'inline-flex' : 'none';
+      el.disabled = onlineReviewIndex === null;
+    } else {
+      el.style.display = showOnlineNewGame ? 'none' : 'inline-flex';
+    }
+  });
+}
+
 /* ══════════════════════════════════════════
    BOARD RENDERING
 ══════════════════════════════════════════ */
@@ -1363,11 +1395,7 @@ function exitOnlineBoardReviewForRemoteUpdate() {
 }
 
 function updateOnlineReviewControls() {
-  const resetBtn = document.getElementById('resetBoardViewBtn');
-  if (resetBtn) {
-    resetBtn.style.display = gameMode === 'friend' ? 'inline-flex' : 'none';
-    resetBtn.disabled = onlineReviewIndex === null;
-  }
+  updateBoardControls();
   document.body?.classList.toggle('online-reviewing-board', onlineReviewIndex !== null);
 }
 
@@ -1528,6 +1556,7 @@ function updateGameInfo() {
     if (playerNamesSection) playerNamesSection.style.display = 'none';
     hidePlayerSlotButtons();
   }
+  updateBoardControls();
 }
 
 function formatOnlinePlayerLabel(color, playerName) {
@@ -4180,9 +4209,9 @@ function findMatch(isRanked = false) {
       const gameSnap = await db.ref(`games/${code}`).once('value');
       if (!gameSnap.exists()) throw new Error('Matched game was not found.');
 
-      const gameData = gameSnap.val();
-      const colors   = gameData.colors || {};
-      const names    = gameData.usernames || {};
+      let gameData = gameSnap.val();
+      let colors   = gameData.colors || {};
+      let names    = gameData.usernames || {};
 
       currentGameRanked = gameData.ranked === true;
       currentGameElos   = gameData.playerElos || {};
@@ -4205,6 +4234,10 @@ function findMatch(isRanked = false) {
         slotUpdates[`games/${code}/colors/${uid}`]      = myColor;
         if (currentGameRanked && myElo != null) slotUpdates[`games/${code}/playerElos/${uid}`] = myElo;
         await db.ref().update(slotUpdates);
+        const refreshedSnap = await db.ref(`games/${code}`).once('value');
+        gameData = refreshedSnap.val() || gameData;
+        colors = gameData.colors || colors;
+        names = gameData.usernames || names;
       }
 
       document.getElementById('matchmakingText').textContent = 'Found opponent! Loading…';
@@ -4845,11 +4878,32 @@ function syncMoveToFriend(notation) {
   const updates = gameStateForFirebase();
   console.log('[SYNC] writing to Firebase, currentTurn in payload:', updates.currentTurn);
 
-  friendGameRef.update(updates).then(() => {
+  ensureOnlinePlayerSlotForSync().then(() => friendGameRef.update(updates)).then(() => {
     console.log('[SYNC] success ✓');
   }).catch(err => {
     console.error('[SYNC] FAILED — Firebase rejected write:', err.code, err.message);
   });
+}
+
+async function ensureOnlinePlayerSlotForSync() {
+  if (!friendGameRef || !currentUser || !myColor) return;
+  try {
+    const snap = await friendGameRef.once('value');
+    const gameData = snap.val() || {};
+    if (playerSlotForUid(gameData, currentUser.uid)) return;
+
+    const slot = myColor === 'w' ? 'joiner' : 'host';
+    if (slot === 'joiner' && gameData.players?.joiner && gameData.players.joiner !== currentUser.uid) return;
+    if (slot === 'host' && gameData.players?.host && gameData.players.host !== currentUser.uid) return;
+
+    const updates = {};
+    updates[`players/${slot}`] = currentUser.uid;
+    updates[`usernames/${slot}`] = sanitizePlayerName(currentUsername || 'Player');
+    updates[`colors/${currentUser.uid}`] = myColor;
+    await friendGameRef.update(updates);
+  } catch (err) {
+    console.warn('Unable to verify online player slot before syncing move:', err);
+  }
 }
 
 function exitFriendGame() {
