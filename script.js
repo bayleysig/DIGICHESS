@@ -1100,7 +1100,7 @@ function resetGameOverModalLayout() {
   const dialog = document.getElementById('gameOverDialog');
   const simple = document.getElementById('gameOverSimpleContent');
   const summary = document.getElementById('gameResultSummary');
-  if (dialog) dialog.classList.remove('result-summary-modal');
+  if (dialog) dialog.classList.remove('result-summary-modal', 'ranked-result-modal', 'unranked-result-modal');
   if (simple) simple.style.display = 'block';
   if (summary) {
     summary.style.display = 'none';
@@ -1230,7 +1230,7 @@ function ratingChangeClass(change) {
 function renderRatingRow(label, rating) {
   if (!rating) {
     return `
-      <div class="summary-rating-block">
+      <div class="summary-rating-card">
         <div class="summary-rating-name">${escapeHtml(label)}</div>
         <div class="summary-rating-line">
           <span>Waiting for update</span>
@@ -1239,10 +1239,10 @@ function renderRatingRow(label, rating) {
       </div>`;
   }
   const signedChange = rating.change > 0 ? `+${rating.change}` : `${rating.change}`;
-  const arrow = rating.change > 0 ? '▲' : rating.change < 0 ? '▼' : '■';
+  const arrow = rating.change > 0 ? '▲' : rating.change < 0 ? '▼' : '';
   return `
-    <div class="summary-rating-block">
-      <div class="summary-rating-name">${escapeHtml(rating.name || label)}</div>
+    <div class="summary-rating-card ${ratingChangeClass(rating.change)}">
+      <div class="summary-rating-name">${escapeHtml(label)}</div>
       <div class="summary-rating-line">
         <span>${rating.oldElo}</span>
         <span>&rarr;</span>
@@ -1258,39 +1258,58 @@ function renderGameResultModal(summary) {
   const container = document.getElementById('gameResultSummary');
   if (!dialog || !simple || !container || !summary) return false;
 
-  dialog.classList.add('result-summary-modal');
+  const isRanked = summary.matchType === 'Ranked';
+  const resultIcon = summary.resultType === 'win'
+    ? (isRanked ? '🏆' : '⚔')
+    : summary.resultType === 'loss'
+      ? '♟'
+      : '½';
+  dialog.classList.add('result-summary-modal', isRanked ? 'ranked-result-modal' : 'unranked-result-modal');
   simple.style.display = 'none';
   container.style.display = 'flex';
   const ratingHtml = summary.ratings ? `
-    <div class="summary-section">
-      <div class="summary-section-title">Rating Changes</div>
-      ${renderRatingRow('You', summary.ratings.mine)}
-      ${renderRatingRow(summary.opponentName, summary.ratings.opponent)}
+    <div class="summary-section rating-summary-section">
+      <div class="summary-section-title"><span></span>Rating Changes<span></span></div>
+      <div class="summary-rating-grid">
+        ${renderRatingRow('Your Rating', summary.ratings.mine)}
+        ${renderRatingRow('Opponent Rating', summary.ratings.opponent)}
+      </div>
     </div>` : '';
   const detailRows = [
-    ['Match', summary.matchType],
-    ['Result', summary.reason],
-    ['Moves', summary.moves],
-    summary.duration ? ['Duration', summary.duration] : null,
-    ['You played', summary.color],
-    ['Opponent', summary.opponentName]
-  ].filter(Boolean).map(([label, value]) => `
+    ['▮', 'Match Type', summary.matchType, summary.matchType.toLowerCase()],
+    ['◎', 'Result', summary.reason, summary.matchType.toLowerCase()],
+    ['♜', 'Moves Played', summary.moves, ''],
+    summary.duration ? ['◷', 'Duration', summary.duration, ''] : null,
+    ['♞', 'You Played', `${summary.color} ${summary.color === 'White' ? '●' : '○'}`, ''],
+    ['●', 'Opponent', summary.opponentName, '']
+  ].filter(Boolean).map(([icon, label, value, tone]) => `
       <div class="summary-detail-row">
-        <span>${escapeHtml(label)}:</span>
-        <strong>${escapeHtml(String(value))}</strong>
+        <span class="summary-detail-icon">${escapeHtml(icon)}</span>
+        <span class="summary-detail-label">${escapeHtml(label)}</span>
+        <strong class="${tone ? `summary-tone-${tone}` : ''}">${escapeHtml(String(value))}</strong>
       </div>`).join('');
+  const subtitleHtml = summary.resultType === 'draw'
+    ? escapeHtml(summary.subtitle)
+    : summary.resultType === 'win'
+      ? `You defeated <strong>${escapeHtml(summary.opponentName)}</strong>`
+      : `<strong>${escapeHtml(summary.opponentName)}</strong> defeated you`;
 
   container.innerHTML = `
+    <button class="summary-close-btn" type="button" onclick="dismissGameOverModal()" aria-label="Close">×</button>
+    <div class="result-kicker">${isRanked ? 'Ranked Game Result' : 'Unranked Game Result'}</div>
     <div class="result-hero">
-      <h2 class="result-title"><span>${summary.resultType === 'win' ? '🏆' : summary.resultType === 'loss' ? '♟' : '½'}</span> ${escapeHtml(summary.title)}</h2>
-      <p class="result-subtitle">${escapeHtml(summary.subtitle)}</p>
+      <div class="result-large-icon">${resultIcon}</div>
+      <h2 class="result-title">${escapeHtml(summary.title)}</h2>
+      <p class="result-subtitle">${subtitleHtml}</p>
     </div>
     ${ratingHtml}
     <div class="summary-section">
-      <div class="summary-detail-list">
+      <div class="summary-section-title"><span></span>Match Summary<span></span></div>
+      <div class="summary-detail-table">
         ${detailRows}
       </div>
-    </div>`;
+    </div>
+    <p class="summary-footnote">${isRanked ? '★ Elo changes shown in ranked games' : '★ No rating changes shown in unranked games'}</p>`;
   return true;
 }
 
@@ -1325,24 +1344,28 @@ function showOnlineResultModal(gameData, rematchPending = false, modalKey = null
 
   const playAgainBtn = document.getElementById('playAgainBtn');
   const rematchBtn = document.getElementById('rematchBtn');
+  const homeBtn = document.getElementById('gameOverHomeBtn');
   const dismissBtn = document.getElementById('gameOverDismissBtn');
   if (playAgainBtn) playAgainBtn.style.display = 'none';
+  if (homeBtn) homeBtn.style.display = summary.matchType === 'Ranked' ? 'inline-flex' : 'none';
   if (dismissBtn) dismissBtn.style.display = 'inline-flex';
   if (rematchBtn) {
     rematchBtn.style.display = 'inline-flex';
     rematchBtn.disabled = false;
     if (gameData.rematchRequest === currentUser?.uid) {
-      rematchBtn.textContent = 'Waiting for opponent...';
+      rematchBtn.innerHTML = '↻ Waiting';
       rematchBtn.disabled = true;
       rematchBtn.onclick = requestRematch;
     } else if (rematchPending) {
-      rematchBtn.textContent = 'Accept Rematch';
+      rematchBtn.innerHTML = '↻ Accept Rematch';
       rematchBtn.onclick = acceptRematch;
     } else {
-      rematchBtn.textContent = 'Request Rematch';
+      rematchBtn.innerHTML = '↻ Request Rematch';
       rematchBtn.onclick = requestRematch;
     }
   }
+  if (homeBtn) homeBtn.innerHTML = '⌂ Home';
+  if (dismissBtn) dismissBtn.innerHTML = '× Dismiss';
 }
 
 /**
@@ -1362,6 +1385,7 @@ function showGameOverModal(title, sub, icon, rematchPending = false, modalKey = 
 
     const playAgainBtn = document.getElementById('playAgainBtn');
     const rematchBtn   = document.getElementById('rematchBtn');
+    const homeBtn      = document.getElementById('gameOverHomeBtn');
     const dismissBtn   = document.getElementById('gameOverDismissBtn');
     if (playAgainBtn) {
       playAgainBtn.textContent = 'Play Again';
@@ -1369,7 +1393,11 @@ function showGameOverModal(title, sub, icon, rematchPending = false, modalKey = 
       playAgainBtn.onclick = newGame;
     }
     if (rematchBtn) rematchBtn.disabled = false;
-    if (dismissBtn) dismissBtn.style.display = 'inline-flex';
+    if (homeBtn) homeBtn.style.display = 'none';
+    if (dismissBtn) {
+      dismissBtn.textContent = 'Dismiss';
+      dismissBtn.style.display = 'inline-flex';
+    }
     if (gameMode === 'friend') {
       if (playAgainBtn) playAgainBtn.style.display = 'none';
       if (rematchBtn) {
@@ -1395,6 +1423,12 @@ function dismissGameOverModal() {
   closeModal('gameOverModal');
 }
 
+function returnHomeFromGameOver() {
+  dismissGameOverModal();
+  if (gameMode === 'friend') exitFriendGame();
+  showHomePage();
+}
+
 function showDrawOfferModal(offer) {
   if (!offer || offer.fromUid === currentUser?.uid) return;
   const offerKey = `${offer.fromUid}_${offer.requestedAt || 'pending'}`;
@@ -1410,8 +1444,10 @@ function showDrawOfferModal(offer) {
 
     const playAgainBtn = document.getElementById('playAgainBtn');
     const rematchBtn   = document.getElementById('rematchBtn');
+    const homeBtn      = document.getElementById('gameOverHomeBtn');
     const dismissBtn   = document.getElementById('gameOverDismissBtn');
     if (dismissBtn) dismissBtn.style.display = 'none';
+    if (homeBtn) homeBtn.style.display = 'none';
     if (playAgainBtn) {
       playAgainBtn.style.display = 'inline-flex';
       playAgainBtn.textContent = 'Accept';
