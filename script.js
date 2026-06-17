@@ -1089,6 +1089,8 @@ function triggerGameOver(reason, lastNotation, forcedLoserColor = null) {
       timerLimitSecs:  timerLimitSecs,
       drawOffer:       null,
       rematchRequest:  null           // clear any prior rematch on new game-over
+    }).catch(err => {
+      console.error('Failed to sync game-over state:', err.code, err.message);
     });
   }
 }
@@ -4878,32 +4880,11 @@ function syncMoveToFriend(notation) {
   const updates = gameStateForFirebase();
   console.log('[SYNC] writing to Firebase, currentTurn in payload:', updates.currentTurn);
 
-  ensureOnlinePlayerSlotForSync().then(() => friendGameRef.update(updates)).then(() => {
+  friendGameRef.update(updates).then(() => {
     console.log('[SYNC] success ✓');
   }).catch(err => {
     console.error('[SYNC] FAILED — Firebase rejected write:', err.code, err.message);
   });
-}
-
-async function ensureOnlinePlayerSlotForSync() {
-  if (!friendGameRef || !currentUser || !myColor) return;
-  try {
-    const snap = await friendGameRef.once('value');
-    const gameData = snap.val() || {};
-    if (playerSlotForUid(gameData, currentUser.uid)) return;
-
-    const slot = myColor === 'w' ? 'joiner' : 'host';
-    if (slot === 'joiner' && gameData.players?.joiner && gameData.players.joiner !== currentUser.uid) return;
-    if (slot === 'host' && gameData.players?.host && gameData.players.host !== currentUser.uid) return;
-
-    const updates = {};
-    updates[`players/${slot}`] = currentUser.uid;
-    updates[`usernames/${slot}`] = sanitizePlayerName(currentUsername || 'Player');
-    updates[`colors/${currentUser.uid}`] = myColor;
-    await friendGameRef.update(updates);
-  } catch (err) {
-    console.warn('Unable to verify online player slot before syncing move:', err);
-  }
 }
 
 function exitFriendGame() {
