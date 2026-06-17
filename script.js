@@ -173,6 +173,8 @@ let handledDrawOffers = new Set();
 let drawOfferModalKey = null;
 let activeGameOverModalKey = null;
 let dismissedGameOverKeys = new Set();
+let dismissedUnkeyedOnlineGameOver = false;
+let playerSlotButtonState = { White: null, Black: null };
 let mirroredInGameFriendRequests = new Set();
 let mirroredInGameFriendAccepts = new Set();
 let mirroredInGameFriendRemovals = new Set();
@@ -1104,6 +1106,7 @@ function showGameOverModal(title, sub, icon, rematchPending = false, modalKey = 
 
 function dismissGameOverModal() {
   if (activeGameOverModalKey) dismissedGameOverKeys.add(activeGameOverModalKey);
+  else if (gameMode === 'friend' && gameOver) dismissedUnkeyedOnlineGameOver = true;
   closeModal('gameOverModal');
 }
 
@@ -1169,6 +1172,9 @@ function requestDraw() {
 
 function acceptDrawOffer() {
   if (!friendGameRef || !currentDrawOffer || !currentUser) return;
+  const title = 'Draw';
+  const sub = 'Both players have accepted a draw.';
+  const icon = '½';
   gameOver = true;
   stopTimers();
   friendGameRef.update({
@@ -1176,14 +1182,17 @@ function acceptDrawOffer() {
     gameOver:        true,
     gameOverReason:  'agreedDraw',
     gameOverWinner:  'Draw',
-    gameOverTitle:   'Draw',
-    gameOverSub:     'Both players have accepted a draw.',
-    gameOverIcon:    '½',
+    gameOverTitle:   title,
+    gameOverSub:     sub,
+    gameOverIcon:    icon,
     drawOffer:       null,
     timerWhiteSecs:  timerWhiteSecs,
     timerBlackSecs:  timerBlackSecs,
     timerLimitSecs:  timerLimitSecs,
     rematchRequest:  null
+  }).then(() => {
+    drawOfferModalKey = null;
+    showGameOverModal(title, sub, icon, false);
   }).catch(err => {
     console.error('Accept draw failed:', err);
   });
@@ -1536,7 +1545,34 @@ function hidePlayerSlotButtons() {
     const friendBtn = document.getElementById(`alreadyFriend${color}`);
     if (addBtn) addBtn.style.display = 'none';
     if (friendBtn) friendBtn.style.display = 'none';
+    playerSlotButtonState[color] = null;
   });
+}
+
+function setPlayerSlotButtonState(color, state, title = 'Add friend') {
+  const addBtn = document.getElementById(`addFriend${color}`);
+  const friendBtn = document.getElementById(`alreadyFriend${color}`);
+  if (!addBtn || !friendBtn) return;
+
+  const stateKey = `${state}:${title}`;
+  if (playerSlotButtonState[color] === stateKey) return;
+  playerSlotButtonState[color] = stateKey;
+
+  addBtn.style.display = 'none';
+  friendBtn.style.display = 'none';
+  addBtn.disabled = false;
+  addBtn.classList.remove('request-sent');
+  addBtn.title = title;
+
+  if (state === 'pending') {
+    addBtn.disabled = true;
+    addBtn.classList.add('request-sent');
+    addBtn.style.display = 'inline-flex';
+  } else if (state === 'friend') {
+    friendBtn.style.display = 'inline-flex';
+  } else if (state === 'add') {
+    addBtn.style.display = 'inline-flex';
+  }
 }
 
 /**
@@ -1550,42 +1586,37 @@ async function updatePlayerSlotButton(color, playerName, myName) {
   const friendBtn  = document.getElementById(`alreadyFriend${color}`);
   if (!addBtn || !friendBtn) return;
 
-  // Hide both to start
-  addBtn.style.display    = 'none';
-  friendBtn.style.display = 'none';
-  addBtn.disabled = false;
-  addBtn.classList.remove('request-sent');
-  addBtn.title = 'Add friend';
-
   // Don't show anything next to our own name
-  if (playerName === myName) return;
+  if (playerName === myName) {
+    setPlayerSlotButtonState(color, 'none');
+    return;
+  }
 
   // Guests can't add friends and can't be added as friends
-  if (!currentUser || !db) return;
-  if (currentUser.isAnonymous) return;
+  if (!currentUser || !db || currentUser.isAnonymous) {
+    setPlayerSlotButtonState(color, 'none');
+    return;
+  }
 
   try {
     const oppUid = getOnlinePlayerUidForDisplayColor(color);
-    if (!oppUid || oppUid === currentUser.uid) return;
-    if (await isGuestPlayer(oppUid, playerName)) return;
+    if (!oppUid || oppUid === currentUser.uid || await isGuestPlayer(oppUid, playerName)) {
+      setPlayerSlotButtonState(color, 'none');
+      return;
+    }
 
     if (hasPendingInGameFriendRequest(oppUid)) {
-      addBtn.disabled = true;
-      addBtn.title = `Friend request sent to ${playerName}`;
-      addBtn.classList.add('request-sent');
-      addBtn.style.display = 'inline-flex';
+      setPlayerSlotButtonState(color, 'pending', `Friend request sent to ${playerName}`);
       return;
     }
 
     const friendSnap = await db.ref(`users/${currentUser.uid}/friends/${oppUid}`).once('value');
     if (friendSnap.exists()) {
-      friendBtn.style.display = 'inline-flex';
+      setPlayerSlotButtonState(color, 'friend');
     } else if (hasAcceptedInGameFriendship(oppUid) && !hasRemovedInGameFriendship(oppUid)) {
-      friendBtn.style.display = 'inline-flex';
+      setPlayerSlotButtonState(color, 'friend');
     } else {
-      addBtn.disabled = false;
-      addBtn.title = `Add ${playerName}`;
-      addBtn.style.display = 'inline-flex';
+      setPlayerSlotButtonState(color, 'add', `Add ${playerName}`);
     }
   } catch (_) {
     // fail silently
@@ -4075,11 +4106,11 @@ function isFreshMatchmakingEntry(entry, now = Date.now()) {
 }
 
 function matchmakingQueuePath(isRanked = activeMatchmakingRanked) {
-  return isRanked ? 'matchmaking/ranked' : 'matchmaking';
+  return 'matchmaking';
 }
 
 function matchmakingPairsPath(isRanked = activeMatchmakingRanked) {
-  return isRanked ? 'matchmakingPairs/ranked' : 'matchmakingPairs';
+  return 'matchmakingPairs';
 }
 
 function findUnrankedMatch() {
@@ -4131,12 +4162,6 @@ function findMatch(isRanked = false) {
 
     await myPairRef.remove().catch(() => {});
     await myRef.remove().catch(() => {});
-    await db.ref(`matchmakingPairs/ranked/${uid}`).remove().catch(() => {});
-    await db.ref(`matchmaking/ranked/${uid}`).remove().catch(() => {});
-    if (isRanked) {
-      await db.ref(`matchmakingPairs/${uid}`).remove().catch(() => {});
-      await db.ref(`matchmaking/${uid}`).remove().catch(() => {});
-    }
     await myRef.set({
       username: myUsername,
       ranked: isRanked,
@@ -4218,6 +4243,7 @@ function findMatch(isRanked = false) {
       const opponentData = snap.val() || {};
       const opponentName = opponentData.username || null;
       if (!isFreshMatchmakingEntry(opponentData)) return;
+      if ((opponentData.ranked === true) !== isRanked) return;
 
       paired = true; // claim synchronously before any await
 
@@ -4326,8 +4352,6 @@ function handleMatchmakingError(err) {
   if (currentUser && db) {
     db.ref(`matchmaking/${currentUser.uid}`).remove().catch(() => {});
     db.ref(`matchmakingPairs/${currentUser.uid}`).remove().catch(() => {});
-    db.ref(`matchmaking/ranked/${currentUser.uid}`).remove().catch(() => {});
-    db.ref(`matchmakingPairs/ranked/${currentUser.uid}`).remove().catch(() => {});
   }
   stopMatchmakingListener();
   const status = document.getElementById('matchmakingStatus');
@@ -4363,8 +4387,6 @@ function cancelMatchmaking() {
   stopMatchmakingListener();
   db.ref(`matchmaking/${currentUser.uid}`).remove();
   db.ref(`matchmakingPairs/${currentUser.uid}`).remove();
-  db.ref(`matchmaking/ranked/${currentUser.uid}`).remove();
-  db.ref(`matchmakingPairs/ranked/${currentUser.uid}`).remove();
   document.getElementById('matchmakingStatus').style.display = 'none';
   document.getElementById('qpIdle').style.display            = 'grid';
 }
@@ -4722,6 +4744,7 @@ function setupGameListener(code, closeOnStart) {
         closeModal('gameOverModal');
         activeGameOverModalKey = null;
         dismissedGameOverKeys = new Set();
+        dismissedUnkeyedOnlineGameOver = false;
         isFlipped = shouldAutoFlipForBlack(localMyColor);
         initGame();
         updateGameInfo();
@@ -4738,6 +4761,10 @@ function setupGameListener(code, closeOnStart) {
     if (gameData.gameOver && gameData.gameOverTitle) {
       const modalAlreadyOpen = document.getElementById('gameOverModal').style.display !== 'none';
       const gameOverKey = onlineGameOverKey(gameData);
+      if (dismissedUnkeyedOnlineGameOver && gameOverKey) {
+        dismissedGameOverKeys.add(gameOverKey);
+        dismissedUnkeyedOnlineGameOver = false;
+      }
       if (modalAlreadyOpen && gameOverKey && !activeGameOverModalKey) {
         activeGameOverModalKey = gameOverKey;
       }
@@ -4789,6 +4816,11 @@ function setupGameListener(code, closeOnStart) {
   const histRef = friendGameRef.child('moveHistory');
   histRef.on('child_added', onRemoteFieldChange);
   gameFieldListeners.push({ ref: histRef, event: 'child_added', handler: onRemoteFieldChange });
+  ['gameOver', 'gameOverReason', 'gameOverTitle', 'drawOffer', 'rematchRequest'].forEach(field => {
+    const ref = friendGameRef.child(field);
+    ref.on('value', onRemoteFieldChange);
+    gameFieldListeners.push({ ref, event: 'value', handler: onRemoteFieldChange });
+  });
 
   gameSyncPollId = setInterval(() => {
     if (!friendGameRef || gameMode !== 'friend') return;
@@ -4841,6 +4873,9 @@ function exitFriendGame() {
   currentDrawOffer = null;
   handledDrawOffers = new Set();
   drawOfferModalKey = null;
+  activeGameOverModalKey = null;
+  dismissedGameOverKeys = new Set();
+  dismissedUnkeyedOnlineGameOver = false;
   currentGameFriendRequests = {};
   currentGameFriendAccepts = {};
   currentGameFriendRemovals = {};
