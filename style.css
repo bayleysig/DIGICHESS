@@ -110,6 +110,7 @@ body.compact-mode {
 .nav-btn {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
   padding: 7px 14px;
   background: transparent;
@@ -147,6 +148,9 @@ body.compact-mode {
 }
 .ai-banner svg { flex-shrink: 0; color: #d29922; }
 .banner-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   margin-left: auto;
   background: none;
   border: none;
@@ -377,8 +381,12 @@ body.compact-mode {
 }
 
 .home-feature-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
   min-height: 184px;
-  text-align: left;
+  text-align: center;
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
@@ -876,9 +884,14 @@ body.hide-legal-moves .square.legal-capture::after {
 }
 
 /* ── BUTTONS ── */
+button {
+  text-align: center;
+}
+
 .btn {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
   padding: 8px 16px;
   border-radius: var(--radius);
@@ -1522,6 +1535,9 @@ body.hide-legal-moves .square.legal-capture::after {
 }
 
 .auth-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   flex: 1;
   background: none;
   border: none;
@@ -1646,6 +1662,7 @@ body.hide-legal-moves .square.legal-capture::after {
 .account-trigger {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 8px;
   background: none;
   border: none;
@@ -1845,6 +1862,7 @@ body.hide-legal-moves .square.legal-capture::after {
 .account-action-btn {
   width: 100%;
   margin-top: 4px;
+  justify-content: center;
 }
 
 .account-success {
@@ -1903,6 +1921,7 @@ body.hide-legal-moves .square.legal-capture::after {
 .theme-choice {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 10px;
   background: var(--bg-panel);
   border: 1px solid var(--border);
@@ -2162,6 +2181,9 @@ body.hide-legal-moves .square.legal-capture::after {
 }
 
 .notif-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   background: none;
   border: none;
   color: var(--text-muted);
@@ -2473,6 +2495,9 @@ body.hide-legal-moves .square.legal-capture::after {
 }
 
 .modal-close-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   background: none;
   border: none;
   color: var(--text-muted);
@@ -2632,6 +2657,9 @@ body.hide-legal-moves .square.legal-capture::after {
 }
 
 .color-choice {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   flex: 1;
   padding: 7px 4px;
   background: var(--bg-panel);
@@ -2667,6 +2695,7 @@ body.hide-legal-moves .square.legal-capture::after {
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
   gap: 5px;
   padding: 16px 10px;
   background: var(--bg-panel);

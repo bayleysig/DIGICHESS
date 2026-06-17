@@ -4272,10 +4272,7 @@ function liveGameStateSignature(gameData) {
     friendRequests: gameData.friendRequests || null,
     friendAccepts: gameData.friendAccepts || null,
     friendRemovals: gameData.friendRemovals || null,
-    drawOffer: gameData.drawOffer || null,
-    ranked: gameData.ranked === true,
-    matchType: gameData.matchType || null,
-    playerElos: gameData.playerElos || null
+    drawOffer: gameData.drawOffer || null
   });
 }
 
