@@ -712,18 +712,20 @@
 
       <div class="account-divider"></div>
 
-      <!-- Owner Mode -->
-      <div class="account-section">
-        <h3 class="account-section-title">Activate Owner Mode</h3>
-        <div class="auth-field">
-          <input type="password" id="ownerPinInput" class="auth-input" placeholder="Enter the 6-digit PIN" maxlength="6" inputmode="numeric" autocomplete="off" />
+      <div id="ownerPinSectionWrap" style="display:none;">
+        <!-- Owner Mode -->
+        <div class="account-section">
+          <h3 class="account-section-title">Activate Owner Mode</h3>
+          <div class="auth-field">
+            <input type="password" id="ownerPinInput" class="auth-input" placeholder="Enter the 6-digit PIN" maxlength="6" inputmode="numeric" autocomplete="off" />
+          </div>
+          <div id="ownerPinError" class="auth-error" style="display:none;"></div>
+          <div id="ownerPinSuccess" class="account-success" style="display:none;"></div>
+          <button class="btn btn-primary account-action-btn" id="ownerPinBtn" onclick="confirmOwnerPin()">Confirm PIN</button>
         </div>
-        <div id="ownerPinError" class="auth-error" style="display:none;"></div>
-        <div id="ownerPinSuccess" class="account-success" style="display:none;"></div>
-        <button class="btn btn-primary account-action-btn" id="ownerPinBtn" onclick="confirmOwnerPin()">Confirm PIN</button>
-      </div>
 
-      <div class="account-divider"></div>
+        <div class="account-divider"></div>
+      </div>
 
       <!-- Sign Out -->
       <div class="account-section" style="text-align:center; padding-bottom:8px;">

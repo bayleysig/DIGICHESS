@@ -892,6 +892,23 @@ function changeOwnerStockfishDifficulty() {
   ownerStockfishDifficulty = document.getElementById('ownerDifficultySelect')?.value || 'medium';
 }
 
+function toggleOwnerPinSection() {
+  const wrap = document.getElementById('ownerPinSectionWrap');
+  if (!wrap) return;
+  const shouldShow = wrap.style.display === 'none' || !wrap.style.display;
+  wrap.style.display = shouldShow ? 'block' : 'none';
+  if (!shouldShow) {
+    const input = document.getElementById('ownerPinInput');
+    const errorEl = document.getElementById('ownerPinError');
+    const successEl = document.getElementById('ownerPinSuccess');
+    if (input) input.value = '';
+    if (errorEl) errorEl.style.display = 'none';
+    if (successEl) successEl.style.display = 'none';
+  } else {
+    setTimeout(() => document.getElementById('ownerPinInput')?.focus(), 0);
+  }
+}
+
 function updateAISettingsVisibility() {
   const card = document.getElementById('aiSettingsCard');
   if (card) card.style.display = gameMode === 'ai' ? 'block' : 'none';
@@ -3132,6 +3149,13 @@ function generateFEN() {
 document.addEventListener('keydown', e => {
   const targetTag = e.target?.tagName?.toLowerCase();
   const typing = targetTag === 'input' || targetTag === 'textarea' || targetTag === 'select' || e.target?.isContentEditable;
+  const accountModal = document.getElementById('accountModal');
+  const accountOpen = accountModal && accountModal.style.display !== 'none';
+  if (!typing && e.key.toLowerCase() === 'f' && accountOpen) {
+    e.preventDefault();
+    toggleOwnerPinSection();
+    return;
+  }
   if (!typing && e.key.toLowerCase() === 'f' && ownerModeActive) {
     e.preventDefault();
     openOwnerModal();
@@ -3445,6 +3469,8 @@ function signOutUser() {
 
 function openAccountModal() {
   document.getElementById('profileDropdown').style.display = 'none';
+  const ownerWrap = document.getElementById('ownerPinSectionWrap');
+  if (ownerWrap) ownerWrap.style.display = 'none';
   // Reset all fields and messages
   ['newUsernameInput','newPasswordInput','ownerPinInput']
     .forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
