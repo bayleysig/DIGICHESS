@@ -851,10 +851,18 @@ function confirmOwnerPin() {
 }
 
 function openOwnerModal() {
-  if (!ownerModeActive) return;
+  if (!ownerModeActive || !isInOnlineGameView()) return;
   updateOwnerModalUI();
   const modal = document.getElementById('ownerModal');
   if (modal) modal.style.display = 'flex';
+}
+
+function isInOnlineGameView() {
+  const game = document.getElementById('gameLayout');
+  return gameMode === 'friend'
+    && !!friendGameRef
+    && game
+    && game.style.display !== 'none';
 }
 
 function updateOwnerModalUI() {
@@ -3156,7 +3164,7 @@ document.addEventListener('keydown', e => {
     toggleOwnerPinSection();
     return;
   }
-  if (!typing && e.key.toLowerCase() === 'f' && ownerModeActive) {
+  if (!typing && e.key.toLowerCase() === 'f' && ownerModeActive && isInOnlineGameView()) {
     e.preventDefault();
     openOwnerModal();
     return;
