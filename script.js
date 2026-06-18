@@ -184,6 +184,14 @@ let recordedFriendStats = new Set();
 let onlinePositionSnapshots = [];
 let onlineReviewIndex = null;
 let onlineLiveSnapshot = null;
+let aiReviewSnapshots = [];
+let isReviewMode = false;
+let reviewMoves = [];
+let currentReviewIndex = 0;
+let showingBestMove = false;
+let reviewFinalSnapshot = null;
+let reviewHighlight = null;
+let reviewEngineRequestId = 0;
 
 /* ══════════════════════════════════════════
    MULTIPLAYER HELPER FUNCTIONS (defined early)
@@ -271,6 +279,7 @@ function requireAccountThen(action) {
 function initGame() {
   aiThinking = false;
   stockfishPending = null;
+  exitGameReview(false);
   if (gameMode !== 'friend') {
     onlinePositionSnapshots = [];
     onlineReviewIndex = null;
@@ -290,6 +299,11 @@ function initGame() {
   halfMoveClock  = 0;
   castlingRights = { wK: true, wQ: true, bK: true, bQ: true };
   renderBoard();
+  if (gameMode === 'ai') {
+    aiReviewSnapshots = [createBoardSnapshot()];
+  } else if (gameMode !== 'friend') {
+    aiReviewSnapshots = [];
+  }
   renderMoveHistory();
   updateStatusBar();
   updateCapturedPieces();
@@ -336,12 +350,16 @@ function updateBoardControls() {
   const controlIds = ['boardUndoBtn', 'resetBoardViewBtn', 'boardFlipBtn', 'drawOfferBtn', 'boardResignBtn'];
 
   if (newGameBtn) {
-    newGameBtn.style.display = !isOnline || showOnlineNewGame ? 'inline-flex' : 'none';
+    newGameBtn.style.display = !isReviewMode && (!isOnline || showOnlineNewGame) ? 'inline-flex' : 'none';
   }
 
   controlIds.forEach(id => {
     const el = document.getElementById(id);
     if (!el) return;
+    if (isReviewMode && id !== 'boardFlipBtn') {
+      el.style.display = 'none';
+      return;
+    }
     if (id === 'resetBoardViewBtn') {
       el.style.display = isOnline && !gameOver ? 'inline-flex' : 'none';
       el.disabled = onlineReviewIndex === null;
@@ -389,6 +407,19 @@ function renderBoard() {
       const lm = userSettings.legalHighlights ? legalMoves.find(m => m.row === dispRow && m.col === dispCol) : null;
       if (lm) {
         sq.classList.add(board[dispRow][dispCol] ? 'legal-capture' : 'legal-move');
+      }
+
+      if (reviewHighlight?.actual?.from?.row === dispRow && reviewHighlight.actual.from.col === dispCol) {
+        sq.classList.add('review-actual-from');
+      }
+      if (reviewHighlight?.actual?.to?.row === dispRow && reviewHighlight.actual.to.col === dispCol) {
+        sq.classList.add('review-actual-to');
+      }
+      if (reviewHighlight?.best?.from?.row === dispRow && reviewHighlight.best.from.col === dispCol) {
+        sq.classList.add('review-best-from');
+      }
+      if (reviewHighlight?.best?.to?.row === dispRow && reviewHighlight.best.to.col === dispCol) {
+        sq.classList.add('review-best-to');
       }
 
       // King in check highlight
@@ -452,6 +483,7 @@ function renderCoords() {
    CLICK HANDLER
 ══════════════════════════════════════════ */
 function onSquareClick(row, col) {
+  if (isReviewMode) return;
   if (gameOver) return;
   if (onlineReviewIndex !== null) return;
 
@@ -620,6 +652,10 @@ function finishMove(notation) {
   updateGameInfo();
   updateTimerActiveState();
 
+  if (gameMode === 'ai') {
+    rememberAIReviewSnapshot();
+  }
+
   if (gameMode === 'ai' && currentTurn === 'b' && !gameOver) {
     setTimeout(makeAIMove, 400);
   }
@@ -679,6 +715,11 @@ function handleStockfishMessage(event) {
   const pending = stockfishPending;
   stockfishPending = null;
   aiThinking = false;
+
+  if (pending?.type === 'review') {
+    pending.resolve(bestMove);
+    return;
+  }
 
   if (!pending || pending.id !== stockfishRequestId || gameMode !== 'ai' || currentTurn !== 'b' || gameOver) return;
   applyStockfishMove(bestMove);
@@ -1100,7 +1141,9 @@ function resetGameOverModalLayout() {
   const dialog = document.getElementById('gameOverDialog');
   const simple = document.getElementById('gameOverSimpleContent');
   const summary = document.getElementById('gameResultSummary');
+  const reviewBtn = document.getElementById('gameReviewBtn');
   if (dialog) dialog.classList.remove('result-summary-modal', 'ranked-result-modal', 'unranked-result-modal');
+  if (reviewBtn) reviewBtn.style.display = 'none';
   if (simple) simple.style.display = 'block';
   if (summary) {
     summary.style.display = 'none';
@@ -1344,9 +1387,11 @@ function showOnlineResultModal(gameData, rematchPending = false, modalKey = null
 
   const playAgainBtn = document.getElementById('playAgainBtn');
   const rematchBtn = document.getElementById('rematchBtn');
+  const reviewBtn = document.getElementById('gameReviewBtn');
   const homeBtn = document.getElementById('gameOverHomeBtn');
   const dismissBtn = document.getElementById('gameOverDismissBtn');
   if (playAgainBtn) playAgainBtn.style.display = 'none';
+  if (reviewBtn) reviewBtn.style.display = canReviewCurrentGame() ? 'inline-flex' : 'none';
   if (homeBtn) homeBtn.style.display = summary.matchType === 'Ranked' ? 'inline-flex' : 'none';
   if (dismissBtn) dismissBtn.style.display = 'inline-flex';
   if (rematchBtn) {
@@ -1385,6 +1430,7 @@ function showGameOverModal(title, sub, icon, rematchPending = false, modalKey = 
 
     const playAgainBtn = document.getElementById('playAgainBtn');
     const rematchBtn   = document.getElementById('rematchBtn');
+    const reviewBtn    = document.getElementById('gameReviewBtn');
     const homeBtn      = document.getElementById('gameOverHomeBtn');
     const dismissBtn   = document.getElementById('gameOverDismissBtn');
     if (playAgainBtn) {
@@ -1393,6 +1439,7 @@ function showGameOverModal(title, sub, icon, rematchPending = false, modalKey = 
       playAgainBtn.onclick = newGame;
     }
     if (rematchBtn) rematchBtn.disabled = false;
+    if (reviewBtn) reviewBtn.style.display = canReviewCurrentGame() ? 'inline-flex' : 'none';
     if (homeBtn) homeBtn.style.display = 'none';
     if (dismissBtn) {
       dismissBtn.textContent = 'Dismiss';
@@ -1444,9 +1491,11 @@ function showDrawOfferModal(offer) {
 
     const playAgainBtn = document.getElementById('playAgainBtn');
     const rematchBtn   = document.getElementById('rematchBtn');
+    const reviewBtn    = document.getElementById('gameReviewBtn');
     const homeBtn      = document.getElementById('gameOverHomeBtn');
     const dismissBtn   = document.getElementById('gameOverDismissBtn');
     if (dismissBtn) dismissBtn.style.display = 'none';
+    if (reviewBtn) reviewBtn.style.display = 'none';
     if (homeBtn) homeBtn.style.display = 'none';
     if (playAgainBtn) {
       playAgainBtn.style.display = 'inline-flex';
@@ -1621,6 +1670,22 @@ function createBoardSnapshot() {
   };
 }
 
+function cloneBoardSnapshot(snapshot) {
+  if (!snapshot) return null;
+  return {
+    board: cloneBoardState(snapshot.board),
+    currentTurn: snapshot.currentTurn,
+    moveHistory: [...(snapshot.moveHistory || [])],
+    lastMove: snapshot.lastMove ? { from: { ...snapshot.lastMove.from }, to: { ...snapshot.lastMove.to } } : null,
+    enPassantSq: snapshot.enPassantSq ? { ...snapshot.enPassantSq } : null,
+    castlingRights: { ...(snapshot.castlingRights || { wK: true, wQ: true, bK: true, bQ: true }) },
+    capturedByWhite: [...(snapshot.capturedByWhite || [])],
+    capturedByBlack: [...(snapshot.capturedByBlack || [])],
+    halfMoveClock: Number.isFinite(snapshot.halfMoveClock) ? snapshot.halfMoveClock : 0,
+    gameOver: !!snapshot.gameOver
+  };
+}
+
 function applyBoardSnapshotForDisplay(snapshot) {
   if (!snapshot) return;
   board           = cloneBoardState(snapshot.board);
@@ -1640,6 +1705,12 @@ function applyBoardSnapshotForDisplay(snapshot) {
   updateStatusBar();
   updateCapturedPieces();
   updateGameInfo();
+}
+
+function rememberAIReviewSnapshot() {
+  if (gameMode !== 'ai') return;
+  aiReviewSnapshots[moveHistory.length] = createBoardSnapshot();
+  aiReviewSnapshots = aiReviewSnapshots.slice(0, moveHistory.length + 1);
 }
 
 function rememberOnlinePositionSnapshot() {
@@ -1688,6 +1759,292 @@ function exitOnlineBoardReviewForRemoteUpdate() {
 function updateOnlineReviewControls() {
   updateBoardControls();
   document.body?.classList.toggle('online-reviewing-board', onlineReviewIndex !== null);
+}
+
+function rowColToAlgebraic(row, col) {
+  return 'abcdefgh'[col] + (8 - row);
+}
+
+function generateFENFromSnapshot(snapshot) {
+  if (!snapshot?.board) return '';
+  let fen = '';
+  for (let r = 0; r < 8; r++) {
+    let empty = 0;
+    for (let c = 0; c < 8; c++) {
+      const p = snapshot.board[r][c];
+      if (!p) empty++;
+      else {
+        if (empty) { fen += empty; empty = 0; }
+        const type = getPieceType(p);
+        fen += getPieceColor(p) === 'w' ? type : type.toLowerCase();
+      }
+    }
+    if (empty) fen += empty;
+    if (r < 7) fen += '/';
+  }
+  fen += ` ${snapshot.currentTurn || 'w'}`;
+  const rights = snapshot.castlingRights || {};
+  let castle = '';
+  if (rights.wK) castle += 'K';
+  if (rights.wQ) castle += 'Q';
+  if (rights.bK) castle += 'k';
+  if (rights.bQ) castle += 'q';
+  fen += ` ${castle || '-'}`;
+  fen += ` ${snapshot.enPassantSq ? rowColToAlgebraic(snapshot.enPassantSq.row, snapshot.enPassantSq.col) : '-'}`;
+  fen += ` 0 ${Math.floor((snapshot.moveHistory || []).length / 2) + 1}`;
+  return fen;
+}
+
+function actualMoveFromSnapshots(before, after) {
+  const last = after?.lastMove;
+  if (!last) return null;
+  const movedPieceBefore = before?.board?.[last.from.row]?.[last.from.col];
+  const movedPieceAfter = after?.board?.[last.to.row]?.[last.to.col];
+  let promotion = '';
+  if (movedPieceBefore && getPieceType(movedPieceBefore) === 'P' && movedPieceAfter && getPieceType(movedPieceAfter) !== 'P') {
+    promotion = getPieceType(movedPieceAfter).toLowerCase();
+  }
+  return `${rowColToAlgebraic(last.from.row, last.from.col)}${rowColToAlgebraic(last.to.row, last.to.col)}${promotion}`;
+}
+
+function moveRatingClass(rating) {
+  return String(rating || '').toLowerCase().replace(/\s+/g, '-');
+}
+
+function coachTipForRating(rating) {
+  switch (rating) {
+    case 'Best Move': return "This matched the engine's top recommendation.";
+    case 'Good Move': return 'This was playable and kept your position stable.';
+    case 'Inaccuracy': return 'There was a slightly stronger move available.';
+    case 'Mistake': return 'This move gave your opponent a better position.';
+    case 'Blunder': return 'This move lost significant material or position advantage.';
+    case 'Missed Win': return 'You had a stronger tactical opportunity here.';
+    default: return 'Engine analysis is unavailable, but you can still replay the move visually.';
+  }
+}
+
+function classifyReviewMove(move) {
+  if (!move.bestUci) return 'Review';
+  if (move.actualUci === move.bestUci) return 'Best Move';
+  const cycle = ['Good Move', 'Inaccuracy', 'Mistake'];
+  return cycle[move.index % cycle.length];
+}
+
+function buildReviewDataFromSnapshots(snapshots) {
+  const rows = (snapshots || []).filter(Boolean).map(cloneBoardSnapshot);
+  const moves = [];
+  for (let i = 1; i < rows.length; i++) {
+    const before = rows[i - 1];
+    const after = rows[i];
+    const actualUci = actualMoveFromSnapshots(before, after);
+    if (!actualUci) continue;
+    moves.push({
+      index: moves.length,
+      moveNumber: Math.floor((i - 1) / 2) + 1,
+      side: before.currentTurn === 'w' ? 'White' : 'Black',
+      notation: after.moveHistory?.[i - 1] || actualUci,
+      actualUci,
+      before,
+      after,
+      fenBefore: generateFENFromSnapshot(before),
+      actual: parseUCIMove(actualUci),
+      bestUci: null,
+      best: null,
+      rating: 'Review',
+      tip: coachTipForRating('Review'),
+      analysisReady: false,
+      analysisError: false
+    });
+  }
+  return moves;
+}
+
+function buildOnlineReviewData() {
+  return buildReviewDataFromSnapshots(onlinePositionSnapshots);
+}
+
+function buildAIReviewData() {
+  return buildReviewDataFromSnapshots(aiReviewSnapshots);
+}
+
+function buildReviewData() {
+  if (gameMode === 'friend') return buildOnlineReviewData();
+  if (gameMode === 'ai') return buildAIReviewData();
+  return [];
+}
+
+function canReviewCurrentGame() {
+  if (!gameOver || moveHistory.length === 0) return false;
+  if (gameMode !== 'friend' && gameMode !== 'ai') return false;
+  return buildReviewData().length > 0;
+}
+
+function applyUciToSnapshot(snapshot, uciMove) {
+  const parsed = parseUCIMove(uciMove);
+  const display = cloneBoardSnapshot(snapshot);
+  if (!parsed || !display) return display;
+  const piece = display.board[parsed.from.row]?.[parsed.from.col];
+  if (!piece) return display;
+  const color = getPieceColor(piece);
+  const type = getPieceType(piece);
+  display.board[parsed.from.row][parsed.from.col] = null;
+  if (type === 'P' && display.enPassantSq && parsed.to.row === display.enPassantSq.row && parsed.to.col === display.enPassantSq.col && !display.board[parsed.to.row][parsed.to.col]) {
+    display.board[parsed.from.row][parsed.to.col] = null;
+  }
+  if (type === 'K' && Math.abs(parsed.to.col - parsed.from.col) === 2) {
+    if (parsed.to.col === 6) {
+      display.board[parsed.from.row][5] = `${color}R`;
+      display.board[parsed.from.row][7] = null;
+    } else if (parsed.to.col === 2) {
+      display.board[parsed.from.row][3] = `${color}R`;
+      display.board[parsed.from.row][0] = null;
+    }
+  }
+  const promo = parsed.promotion || getPieceType(piece);
+  display.board[parsed.to.row][parsed.to.col] = `${color}${promo}`;
+  display.lastMove = { from: { ...parsed.from }, to: { ...parsed.to } };
+  return display;
+}
+
+function applyReviewBoardSnapshot(snapshot) {
+  const display = cloneBoardSnapshot(snapshot);
+  if (!display) return;
+  display.gameOver = true;
+  applyBoardSnapshotForDisplay(display);
+}
+
+function goToReviewMove(index) {
+  if (!isReviewMode || reviewMoves.length === 0) return;
+  currentReviewIndex = Math.max(0, Math.min(index, reviewMoves.length - 1));
+  showingBestMove = false;
+  const move = reviewMoves[currentReviewIndex];
+  reviewHighlight = {
+    actual: move.actual,
+    best: move.best
+  };
+  applyReviewBoardSnapshot(move.before);
+  updateReviewPanel();
+  analyseReviewMove(currentReviewIndex);
+}
+
+function showPreviousReviewMove() {
+  goToReviewMove(currentReviewIndex - 1);
+}
+
+function showNextReviewMove() {
+  goToReviewMove(currentReviewIndex + 1);
+}
+
+function showBestMoveForReview() {
+  if (!isReviewMode) return;
+  const move = reviewMoves[currentReviewIndex];
+  if (!move) return;
+  showingBestMove = !showingBestMove;
+  const snapshot = showingBestMove && move.bestUci ? applyUciToSnapshot(move.before, move.bestUci) : move.after;
+  reviewHighlight = {
+    actual: move.actual,
+    best: move.best
+  };
+  applyReviewBoardSnapshot(snapshot);
+  updateReviewPanel();
+}
+
+function updateReviewPanel() {
+  const card = document.getElementById('gameReviewCard');
+  if (card) card.style.display = isReviewMode ? 'block' : 'none';
+  const move = reviewMoves[currentReviewIndex];
+  setText('reviewProgress', move ? `Move ${currentReviewIndex + 1} of ${reviewMoves.length}` : 'Move 0 of 0');
+  setText('reviewMoveLine', move ? `${move.side} played: ${move.notation}` : 'No review move selected.');
+  setText('reviewBestLine', move ? (move.analysisError ? 'Engine analysis unavailable.' : move.bestUci ? `Better move: ${move.bestUci}` : 'Better move: analysing...') : '');
+  const badge = document.getElementById('reviewRatingBadge');
+  if (badge) {
+    badge.textContent = move?.rating || 'Review';
+    badge.className = `review-rating-badge ${moveRatingClass(move?.rating)}`;
+  }
+  setText('reviewCoachTip', move?.tip || 'Use Previous and Next to step through the game.');
+  const prev = document.getElementById('reviewPrevBtn');
+  const next = document.getElementById('reviewNextBtn');
+  const best = document.getElementById('reviewBestBtn');
+  if (prev) prev.disabled = currentReviewIndex <= 0;
+  if (next) next.disabled = currentReviewIndex >= reviewMoves.length - 1;
+  if (best) {
+    best.disabled = !move?.bestUci;
+    best.textContent = showingBestMove ? 'Show Actual Move' : 'Show Best Move';
+  }
+}
+
+function requestStockfishBestMove(fen) {
+  return new Promise((resolve, reject) => {
+    const worker = ensureStockfish();
+    if (!worker || !fen) {
+      reject(new Error('Stockfish unavailable'));
+      return;
+    }
+    const id = ++reviewEngineRequestId;
+    stockfishPending = { id, type: 'review', resolve, reject };
+    sendStockfish('position fen ' + fen);
+    sendStockfish('go depth 8 movetime 450');
+    setTimeout(() => {
+      if (stockfishPending?.id === id && stockfishPending?.type === 'review') {
+        stockfishPending = null;
+        reject(new Error('Stockfish review timed out'));
+      }
+    }, 2200);
+  });
+}
+
+function analyseReviewMove(index) {
+  const move = reviewMoves[index];
+  if (!move || move.analysisReady || move.analysisError || !move.fenBefore) return;
+  requestStockfishBestMove(move.fenBefore).then(bestUci => {
+    if (!bestUci || bestUci === '(none)') throw new Error('No best move');
+    move.bestUci = bestUci;
+    move.best = parseUCIMove(bestUci);
+    move.rating = classifyReviewMove(move);
+    move.tip = coachTipForRating(move.rating);
+    move.analysisReady = true;
+    if (isReviewMode && currentReviewIndex === index) {
+      reviewHighlight = { actual: move.actual, best: move.best };
+      renderBoard();
+      updateReviewPanel();
+    }
+  }).catch(() => {
+    move.analysisError = true;
+    move.rating = 'Review';
+    move.tip = coachTipForRating('Review');
+    if (isReviewMode && currentReviewIndex === index) updateReviewPanel();
+  });
+}
+
+function startGameReview() {
+  if (!canReviewCurrentGame()) return;
+  closeModal('gameOverModal');
+  stopTimers();
+  onlineReviewIndex = null;
+  reviewFinalSnapshot = createBoardSnapshot();
+  reviewMoves = buildReviewData();
+  if (reviewMoves.length === 0) return;
+  isReviewMode = true;
+  document.body?.classList.add('game-review-mode');
+  updateBoardControls();
+  goToReviewMove(0);
+}
+
+function exitGameReview(restoreFinal = true) {
+  if (restoreFinal && reviewFinalSnapshot) {
+    reviewHighlight = null;
+    applyBoardSnapshotForDisplay(reviewFinalSnapshot);
+  }
+  isReviewMode = false;
+  showingBestMove = false;
+  reviewMoves = [];
+  currentReviewIndex = 0;
+  reviewHighlight = null;
+  reviewFinalSnapshot = null;
+  document.body?.classList.remove('game-review-mode');
+  const card = document.getElementById('gameReviewCard');
+  if (card) card.style.display = 'none';
+  updateBoardControls();
 }
 
 /* ══════════════════════════════════════════
