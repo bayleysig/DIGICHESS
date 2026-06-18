@@ -712,6 +712,19 @@
 
       <div class="account-divider"></div>
 
+      <!-- Owner Mode -->
+      <div class="account-section">
+        <h3 class="account-section-title">Activate Owner Mode</h3>
+        <div class="auth-field">
+          <input type="password" id="ownerPinInput" class="auth-input" placeholder="Enter the 6-digit PIN" maxlength="6" inputmode="numeric" autocomplete="off" />
+        </div>
+        <div id="ownerPinError" class="auth-error" style="display:none;"></div>
+        <div id="ownerPinSuccess" class="account-success" style="display:none;"></div>
+        <button class="btn btn-primary account-action-btn" id="ownerPinBtn" onclick="confirmOwnerPin()">Confirm PIN</button>
+      </div>
+
+      <div class="account-divider"></div>
+
       <!-- Sign Out -->
       <div class="account-section" style="text-align:center; padding-bottom:8px;">
         <button class="btn btn-ghost" onclick="signOutUser(); closeModal('accountModal');">
@@ -729,6 +742,46 @@
 
       <div class="modal-actions" style="margin-top:16px;">
         <button class="btn btn-ghost" onclick="closeModal('accountModal')">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="modal-overlay" id="ownerModal" style="display:none;">
+    <div class="modal account-modal owner-modal">
+      <h2 class="modal-title">Owner Modifications</h2>
+      <p class="modal-sub">Developer debugging controls for unranked online games.</p>
+
+      <div class="account-section">
+        <button class="btn owner-stockfish-toggle off" id="ownerStockfishToggle" onclick="toggleOwnerStockfish()">Stockfish: OFF</button>
+      </div>
+
+      <div class="account-divider"></div>
+
+      <div class="account-section">
+        <h3 class="account-section-title">Move Timing</h3>
+        <div class="owner-grid">
+          <label class="ai-setting-label" for="ownerMinTimeInput">Min Time</label>
+          <label class="ai-setting-label" for="ownerMaxTimeInput">Max Time</label>
+          <input type="number" id="ownerMinTimeInput" class="auth-input" min="0" step="0.1" value="1" onchange="updateOwnerTiming()" />
+          <input type="number" id="ownerMaxTimeInput" class="auth-input" min="0" step="0.1" value="3" onchange="updateOwnerTiming()" />
+        </div>
+      </div>
+
+      <div class="account-divider"></div>
+
+      <div class="account-section">
+        <h3 class="account-section-title">Stockfish Difficulty</h3>
+        <select class="timer-select" id="ownerDifficultySelect" onchange="changeOwnerStockfishDifficulty()" style="width:100%;">
+          <option value="beginner">Beginner</option>
+          <option value="easy">Easy</option>
+          <option value="medium" selected>Medium</option>
+          <option value="hard">Hard</option>
+          <option value="expert">Expert</option>
+        </select>
+      </div>
+
+      <div class="modal-actions" style="margin-top:16px;">
+        <button class="btn btn-ghost" onclick="closeModal('ownerModal')">Close</button>
       </div>
     </div>
   </div>

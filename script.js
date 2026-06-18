@@ -194,6 +194,14 @@ let reviewBoardView = 'before';
 let reviewFinalSnapshot = null;
 let reviewHighlight = null;
 let reviewEngineRequestId = 0;
+let ownerModeActive = false;
+let ownerStockfishEnabled = false;
+let ownerMinMoveTime = 1;
+let ownerMaxMoveTime = 3;
+let ownerStockfishDifficulty = 'medium';
+let ownerStockfishTimer = null;
+let ownerStockfishToken = 0;
+let ownerStockfishBusy = false;
 
 /* ══════════════════════════════════════════
    MULTIPLAYER HELPER FUNCTIONS (defined early)
@@ -282,6 +290,7 @@ function initGame() {
   aiThinking = false;
   stockfishPending = null;
   exitGameReview(false);
+  if (gameMode !== 'friend') cancelOwnerStockfishMove();
   if (gameMode !== 'friend') {
     onlinePositionSnapshots = [];
     onlineReviewIndex = null;
@@ -678,6 +687,7 @@ function finishMove(notation) {
   if (gameMode === 'friend') {
     rememberOnlinePositionSnapshot();
     syncMoveToFriend(notation);
+    scheduleOwnerStockfishMove();
   }
 }
 
@@ -731,7 +741,7 @@ function handleStockfishMessage(event) {
   aiThinking = false;
   updateBoardControls();
 
-  if (pending?.type === 'review') {
+  if (pending?.type === 'review' || pending?.type === 'owner') {
     pending.resolve(bestMove);
     return;
   }
@@ -740,8 +750,8 @@ function handleStockfishMessage(event) {
   applyStockfishMove(bestMove);
 }
 
-function configureStockfishDifficulty() {
-  const config = AI_DIFFICULTIES[aiDifficulty] || AI_DIFFICULTIES.medium;
+function configureStockfishDifficulty(difficulty = aiDifficulty) {
+  const config = AI_DIFFICULTIES[difficulty] || AI_DIFFICULTIES.medium;
   sendStockfish('setoption name Skill Level value ' + config.skill);
   sendStockfish('setoption name Hash value 16');
   sendStockfish('isready');
@@ -817,6 +827,69 @@ function changeAIDifficulty() {
   configureStockfishDifficulty();
   const config = AI_DIFFICULTIES[aiDifficulty] || AI_DIFFICULTIES.medium;
   setAIStatus(`Difficulty set to ${config.label}. Human plays White.`);
+}
+
+function confirmOwnerPin() {
+  const input = document.getElementById('ownerPinInput');
+  const errorEl = document.getElementById('ownerPinError');
+  const successEl = document.getElementById('ownerPinSuccess');
+  if (errorEl) errorEl.style.display = 'none';
+  if (successEl) successEl.style.display = 'none';
+
+  if ((input?.value || '').trim() === '314159') {
+    ownerModeActive = true;
+    if (successEl) {
+      successEl.textContent = 'welcome back bayleysig';
+      successEl.style.display = 'block';
+    }
+    if (input) input.value = '';
+    updateOwnerModalUI();
+  } else if (errorEl) {
+    errorEl.textContent = 'nice try buddy';
+    errorEl.style.display = 'block';
+  }
+}
+
+function openOwnerModal() {
+  if (!ownerModeActive) return;
+  updateOwnerModalUI();
+  const modal = document.getElementById('ownerModal');
+  if (modal) modal.style.display = 'flex';
+}
+
+function updateOwnerModalUI() {
+  const toggle = document.getElementById('ownerStockfishToggle');
+  if (toggle) {
+    toggle.textContent = ownerStockfishEnabled ? 'Stockfish: ON' : 'Stockfish: OFF';
+    toggle.classList.toggle('on', ownerStockfishEnabled);
+    toggle.classList.toggle('off', !ownerStockfishEnabled);
+  }
+  const minInput = document.getElementById('ownerMinTimeInput');
+  const maxInput = document.getElementById('ownerMaxTimeInput');
+  const difficulty = document.getElementById('ownerDifficultySelect');
+  if (minInput) minInput.value = String(ownerMinMoveTime);
+  if (maxInput) maxInput.value = String(ownerMaxMoveTime);
+  if (difficulty) difficulty.value = ownerStockfishDifficulty;
+}
+
+function toggleOwnerStockfish() {
+  if (!ownerModeActive) return;
+  ownerStockfishEnabled = !ownerStockfishEnabled;
+  updateOwnerModalUI();
+  if (ownerStockfishEnabled) scheduleOwnerStockfishMove();
+  else cancelOwnerStockfishMove();
+}
+
+function updateOwnerTiming() {
+  const min = Number(document.getElementById('ownerMinTimeInput')?.value);
+  const max = Number(document.getElementById('ownerMaxTimeInput')?.value);
+  ownerMinMoveTime = Math.max(0, Number.isFinite(min) ? min : 0);
+  ownerMaxMoveTime = Math.max(ownerMinMoveTime, Number.isFinite(max) ? max : ownerMinMoveTime);
+  updateOwnerModalUI();
+}
+
+function changeOwnerStockfishDifficulty() {
+  ownerStockfishDifficulty = document.getElementById('ownerDifficultySelect')?.value || 'medium';
 }
 
 function updateAISettingsVisibility() {
@@ -2146,6 +2219,105 @@ function requestStockfishBestMove(fen) {
   });
 }
 
+function requestOwnerStockfishMove(fen) {
+  return new Promise((resolve, reject) => {
+    const worker = ensureStockfish();
+    if (!worker || !fen) {
+      reject(new Error('Stockfish unavailable'));
+      return;
+    }
+    const config = AI_DIFFICULTIES[ownerStockfishDifficulty] || AI_DIFFICULTIES.medium;
+    const id = ++reviewEngineRequestId;
+    stockfishPending = { id, type: 'owner', resolve, reject };
+    configureStockfishDifficulty(ownerStockfishDifficulty);
+    sendStockfish('ucinewgame');
+    sendStockfish('position fen ' + fen);
+    sendStockfish(`go depth ${config.depth} movetime ${config.movetime}`);
+    setTimeout(() => {
+      if (stockfishPending?.id === id && stockfishPending?.type === 'owner') {
+        stockfishPending = null;
+        reject(new Error('Owner Stockfish timed out'));
+      }
+    }, Math.max(1800, config.movetime + 1400));
+  });
+}
+
+function canOwnerStockfishMove() {
+  return ownerModeActive
+    && ownerStockfishEnabled
+    && gameMode === 'friend'
+    && !currentGameRanked
+    && !gameOver
+    && !isReviewMode
+    && onlineReviewIndex === null
+    && friendGameRef
+    && (myColor === 'w' || myColor === 'b')
+    && currentTurn === myColor;
+}
+
+function cancelOwnerStockfishMove() {
+  ownerStockfishToken++;
+  if (ownerStockfishTimer) {
+    clearTimeout(ownerStockfishTimer);
+    ownerStockfishTimer = null;
+  }
+}
+
+function randomOwnerMoveDelayMs() {
+  const min = Math.max(0, Number(ownerMinMoveTime) || 0);
+  const max = Math.max(min, Number(ownerMaxMoveTime) || min);
+  return (min + Math.random() * (max - min)) * 1000;
+}
+
+function scheduleOwnerStockfishMove() {
+  if (!canOwnerStockfishMove()) {
+    cancelOwnerStockfishMove();
+    return;
+  }
+  if (ownerStockfishTimer || ownerStockfishBusy) return;
+
+  const token = ++ownerStockfishToken;
+  const fen = generateFEN();
+  ownerStockfishBusy = true;
+  requestOwnerStockfishMove(fen).then(bestMove => {
+    ownerStockfishBusy = false;
+    if (token !== ownerStockfishToken || !canOwnerStockfishMove()) return;
+    ownerStockfishTimer = setTimeout(() => {
+      ownerStockfishTimer = null;
+      if (token !== ownerStockfishToken || !canOwnerStockfishMove()) return;
+      if (generateFEN() !== fen) {
+        scheduleOwnerStockfishMove();
+        return;
+      }
+      playOwnerStockfishMove(bestMove);
+    }, randomOwnerMoveDelayMs());
+  }).catch(err => {
+    ownerStockfishBusy = false;
+    if (token === ownerStockfishToken) ownerStockfishTimer = null;
+    console.warn('Owner Stockfish move failed:', err);
+  });
+}
+
+function playOwnerStockfishMove(uciMove) {
+  if (!canOwnerStockfishMove() || !uciMove || uciMove === '(none)') return;
+  const parsed = parseUCIMove(uciMove);
+  if (!parsed) return;
+  const legal = getLegalMoves(parsed.from.row, parsed.from.col)
+    .find(move => move.row === parsed.to.row && move.col === parsed.to.col);
+  if (!legal) {
+    console.warn('Owner Stockfish suggested illegal move:', uciMove, generateFEN());
+    return;
+  }
+  executeMove(
+    parsed.from.row,
+    parsed.from.col,
+    parsed.to.row,
+    parsed.to.col,
+    legal.special,
+    parsed.promotion
+  );
+}
+
 function analyseReviewMove(index) {
   const move = reviewMoves[index];
   if (!move || move.analysisReady || move.analysisError || !move.fenBefore) return;
@@ -2958,10 +3130,18 @@ function generateFEN() {
    KEYBOARD SHORTCUTS
 ══════════════════════════════════════════ */
 document.addEventListener('keydown', e => {
+  const targetTag = e.target?.tagName?.toLowerCase();
+  const typing = targetTag === 'input' || targetTag === 'textarea' || targetTag === 'select' || e.target?.isContentEditable;
+  if (!typing && e.key.toLowerCase() === 'f' && ownerModeActive) {
+    e.preventDefault();
+    openOwnerModal();
+    return;
+  }
   if (e.key === 'z' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); undoMove(); }
   if (e.key === 'Escape') {
     closeModal('promotionModal');
     closeModal('authModal');
+    closeModal('ownerModal');
     selectedSq = null; legalMoves = []; renderBoard();
   }
   // Enter submits auth forms
@@ -3266,16 +3446,16 @@ function signOutUser() {
 function openAccountModal() {
   document.getElementById('profileDropdown').style.display = 'none';
   // Reset all fields and messages
-  ['newUsernameInput','newPasswordInput']
+  ['newUsernameInput','newPasswordInput','ownerPinInput']
     .forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
-  ['changeUsernameError','changeUsernameSuccess','changePasswordError','changePasswordSuccess','deleteAccountError']
+  ['changeUsernameError','changeUsernameSuccess','changePasswordError','changePasswordSuccess','ownerPinError','ownerPinSuccess','deleteAccountError']
     .forEach(id => { const el = document.getElementById(id); if (el) el.style.display = 'none'; });
-  ['changeUsernameBtn','changePasswordBtn','deleteAccountBtn']
+  ['changeUsernameBtn','changePasswordBtn','ownerPinBtn','deleteAccountBtn']
     .forEach(id => {
       const el = document.getElementById(id);
       if (el) {
         el.disabled = false;
-        el.textContent = { changeUsernameBtn:'Update Username', changePasswordBtn:'Update Password', deleteAccountBtn:'Delete Account' }[id];
+        el.textContent = { changeUsernameBtn:'Update Username', changePasswordBtn:'Update Password', ownerPinBtn:'Confirm PIN', deleteAccountBtn:'Delete Account' }[id];
       }
     });
 
@@ -4912,6 +5092,7 @@ function applySyncedGameState(gameData) {
   legalMoves      = [];
   rememberOnlinePositionSnapshot();
   if (wasReviewing && gameMode === 'friend' && !gameOver && timerLimitSecs > 0) startTimers();
+  scheduleOwnerStockfishMove();
 
   return true;
 }
@@ -5723,6 +5904,7 @@ function syncMoveToFriend(notation) {
 }
 
 function exitFriendGame() {
+  cancelOwnerStockfishMove();
   if (gameListener && friendGameRef) {
     friendGameRef.off('value', gameListener);
   }
@@ -5831,9 +6013,10 @@ function copyJoinCode() {
 /* ══════════════════════════════════════════
    CLOSE MODALS ON OVERLAY CLICK
 ══════════════════════════════════════════ */
-['gameOverModal', 'friendModal'].forEach(id => {
+['gameOverModal', 'friendModal', 'ownerModal'].forEach(id => {
   document.getElementById(id)?.addEventListener('click', function(e) {
     if (e.target === this && id === 'gameOverModal') dismissGameOverModal();
+    else if (e.target === this) closeModal(id);
   });
 });
 

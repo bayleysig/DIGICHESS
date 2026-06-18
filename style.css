@@ -1980,6 +1980,34 @@ button {
   margin-bottom: 10px;
 }
 
+.owner-modal {
+  max-width: 430px;
+}
+
+.owner-stockfish-toggle {
+  width: 100%;
+  justify-content: center;
+  font-weight: 800;
+}
+
+.owner-stockfish-toggle.off {
+  background: rgba(248, 81, 73, 0.14);
+  border-color: rgba(248, 81, 73, 0.5);
+  color: var(--danger);
+}
+
+.owner-stockfish-toggle.on {
+  background: var(--green);
+  border-color: var(--green-dark);
+  color: #fff;
+}
+
+.owner-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
 .stats-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
