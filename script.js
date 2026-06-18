@@ -2539,7 +2539,7 @@ function updatePracticePanel(showExplanation = false) {
   const restartBtn = document.getElementById('practiceRestartBtn');
   if (hintBtn) hintBtn.style.display = expectedPracticeMove() ? 'inline-flex' : 'none';
   if (nextBtn) nextBtn.style.display = practiceType === 'opening' ? 'none' : 'inline-flex';
-  if (nextBtn) nextBtn.textContent = 'Next Challenge';
+  if (nextBtn) nextBtn.textContent = 'Next';
   if (restartBtn) restartBtn.style.display = 'inline-flex';
 }
 
