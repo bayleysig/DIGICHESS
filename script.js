@@ -9,9 +9,6 @@ let gameMode = "pvp"; // "pvp" | "ai" | "friend" | "practice"
 
 /* ── FIREBASE CONFIG (will initialize after SDK loads) ── */
 let db = null;
-const DIGICHAT_THREAD_ID = '__digichat__';
-const DIGICHAT_CHAT_ID = 'DIGICHAT';
-const DIGICHAT_NAME = 'DIGICHAT';
 const STARTING_ELO = 400;
 const MIN_ELO = 100;
 const ELO_K_FACTOR = 32;
@@ -5461,20 +5458,15 @@ let friendRequestNotifRef = null;
 let friendRequestNotifHandler = null;
 
 function dmChatId(uid1, uid2) {
-  if (uid1 === DIGICHAT_THREAD_ID || uid2 === DIGICHAT_THREAD_ID) return DIGICHAT_CHAT_ID;
   return [uid1, uid2].sort().join('_');
 }
 
-function isDigichatThread(threadId) {
-  return threadId === DIGICHAT_THREAD_ID;
-}
-
 function getThreadChatId(threadId) {
-  return isDigichatThread(threadId) ? DIGICHAT_CHAT_ID : dmChatId(currentUser.uid, threadId);
+  return dmChatId(currentUser.uid, threadId);
 }
 
-function getThreadAvatar(name, isGlobal = false) {
-  return isGlobal ? 'D' : sanitizePlayerName(name, 'Player').charAt(0).toUpperCase();
+function getThreadAvatar(name) {
+  return sanitizePlayerName(name, 'Player').charAt(0).toUpperCase();
 }
 
 function openMessagesModal() {
@@ -5496,13 +5488,6 @@ async function loadDmThreadList() {
   threadEl.innerHTML = '';
   noMsg.style.display = 'none';
 
-  await appendDmThreadRow({
-    threadId: DIGICHAT_THREAD_ID,
-    name: DIGICHAT_NAME,
-    chatId: DIGICHAT_CHAT_ID,
-    isGlobal: true
-  });
-
   // Get friends list to show threads for
   const friendsSnap = await db.ref(`users/${uid}/friends`).once('value');
   const friends = friendsSnap.val() || {};
@@ -5514,7 +5499,7 @@ async function loadDmThreadList() {
   await appendFriendDmRows(fUids, friends);
 }
 
-async function appendDmThreadRow({ threadId, name, chatId, isGlobal = false }) {
+async function appendDmThreadRow({ threadId, name, chatId }) {
   const threadEl = document.getElementById('dmThreadList');
   const uid = currentUser.uid;
   const now = Date.now();
@@ -5522,7 +5507,7 @@ async function appendDmThreadRow({ threadId, name, chatId, isGlobal = false }) {
 
   const lastSnap = await db.ref(`chats/${chatId}`)
     .orderByChild('sentAt').limitToLast(1).once('value');
-  let preview = isGlobal ? 'Everyone with an account is here' : 'No messages yet';
+  let preview = 'No messages yet';
   let lastTime = '';
   if (lastSnap.exists()) {
     lastSnap.forEach(s => {
@@ -5537,9 +5522,9 @@ async function appendDmThreadRow({ threadId, name, chatId, isGlobal = false }) {
   }
 
   const row = document.createElement('div');
-  row.className = `dm-thread-row${isGlobal ? ' dm-thread-digichat' : ''}`;
+  row.className = 'dm-thread-row';
   row.innerHTML = `
-    <span class="friend-avatar">${getThreadAvatar(name, isGlobal)}</span>
+    <span class="friend-avatar">${getThreadAvatar(name)}</span>
     <div class="dm-thread-info">
       <span class="dm-thread-name">${escapeHtml(name)}</span>
       <span class="dm-thread-preview">${escapeHtml(preview)}</span>
@@ -5630,13 +5615,6 @@ function startDmNotifListener() {
   const uid = currentUser.uid;
   stopDmNotifListener();
 
-  watchMessageThread({
-    threadId: DIGICHAT_THREAD_ID,
-    chatId: DIGICHAT_CHAT_ID,
-    name: DIGICHAT_NAME,
-    isGlobal: true
-  });
-
   db.ref(`users/${uid}/friends`).once('value').then(snap => {
     const friends = snap.val() || {};
 
@@ -5651,7 +5629,7 @@ function startDmNotifListener() {
   });
 }
 
-function watchMessageThread({ threadId, chatId, name, isGlobal = false }) {
+function watchMessageThread({ threadId, chatId, name }) {
   const uid = currentUser.uid;
   const listenStart = Date.now();
   const query = db.ref(`chats/${chatId}`).orderByChild('sentAt').startAt(listenStart);
@@ -5665,16 +5643,13 @@ function watchMessageThread({ threadId, chatId, name, isGlobal = false }) {
     dmUnreadCounts[threadId] = (dmUnreadCounts[threadId] || 0) + 1;
     updateUnreadBadge();
     const sender = sanitizePlayerName(msg.username, 'Player');
-    const title = isGlobal
-      ? `New message in <strong>${DIGICHAT_NAME}</strong>`
-      : `New message from <strong>${sender}</strong>`;
-    const openName = isGlobal ? DIGICHAT_NAME : sender;
+    const title = `New message from <strong>${sender}</strong>`;
     pushNotif({
       type:        'message',
       icon:        '💬',
       title,
       body:        String(msg.text || '').substring(0, 60) + (String(msg.text || '').length > 60 ? '...' : ''),
-      actions:     [{ label: 'Open', cls: 'btn-primary', onclick: `openMessagesModal(); openDmChat('${threadId}','${openName}')` }],
+      actions:     [{ label: 'Open', cls: 'btn-primary', onclick: `openMessagesModal(); openDmChat('${threadId}','${sender}')` }],
       autoDismiss: NOTIF_AUTO_DISMISS_MS
     });
   });
