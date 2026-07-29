@@ -35,12 +35,13 @@ function initFirebase() {
   try {
     if (firebase && !firebase.apps.length) {
       const firebaseConfig = {
-        apiKey: "AIzaSyBWCRgFXvIpjKq9mXJYouYp20hqv-jKyH0",
-        authDomain: "digichess-e858b.firebaseapp.com",
-        projectId: "digichess-e858b",
-        databaseURL: "https://digichess-e858b-default-rtdb.asia-southeast1.firebasedatabase.app",
-        messagingSenderId: "689026321934",
-        appId: "1:689026321934:web:a3656a9dcf581ab727b65f"
+        apiKey: "AIzaSyBHo0oSo952lgdL3kF3F_NjY-gUPtpw_4E",
+        authDomain: "digichess-chatgpt.firebaseapp.com",
+        projectId: "digichess-chatgpt",
+        databaseURL: "https://digichess-chatgpt-default-rtdb.asia-southeast1.firebasedatabase.app",
+        storageBucket: "digichess-chatgpt.firebasestorage.app",
+        messagingSenderId: "1074288319691",
+        appId: "1:1074288319691:web:ea09509dd36fc3eb9d0f4e"
       };
       
       firebase.initializeApp(firebaseConfig);
