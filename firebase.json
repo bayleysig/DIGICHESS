@@ -1,4 +1,14 @@
 {
+  "auth": {
+    "providers": {
+      "anonymous": true,
+      "emailPassword": true,
+      "googleSignIn": {
+        "oAuthBrandDisplayName": "DigiChess",
+        "supportEmail": "bayley.cartwright@hotmail.com"
+      }
+    }
+  },
   "database": {
     "rules": "database.rules.json"
   },
