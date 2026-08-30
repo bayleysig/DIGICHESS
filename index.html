@@ -842,7 +842,7 @@
 
       <!-- Sign Out -->
       <div class="account-section" style="text-align:center; padding-bottom:8px;">
-        <button class="btn btn-ghost" onclick="signOutUser(); closeModal('accountModal');">
+        <button class="btn btn-ghost" onclick="if (signOutUser() !== false) closeModal('accountModal');">
           Sign Out
         </button>
       </div>

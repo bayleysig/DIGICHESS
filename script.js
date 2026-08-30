@@ -471,6 +471,9 @@ function openPlayOnlineModal() {
 function openFriendModal() { openPlayOnlineModal(); }
 
 function showHomePage() {
+  if (!confirmLeavingActiveGame('go back to the home page')) return;
+  abandonActiveGameForNavigation();
+
   const home = document.getElementById('homePage');
   const game = document.getElementById('gameLayout');
   if (home) home.style.display = 'block';
@@ -506,6 +509,56 @@ function requireAccountThen(action) {
     return;
   }
   action();
+}
+
+// Confirms before actions that would abandon a game already in progress.
+function isGamePageVisible() {
+  const game = document.getElementById('gameLayout');
+  return !!game && window.getComputedStyle(game).display !== 'none';
+}
+
+function hasGameInProgress() {
+  if (!isGamePageVisible() || gameOver || isReviewMode) return false;
+  if (gameMode === 'friend') return !!friendGameRef;
+  if (gameMode === 'practice') return !!currentPracticeChallenge;
+  return moveHistory.length > 0 ||
+         stateHistory.length > 0 ||
+         capturedByWhite.length > 0 ||
+         capturedByBlack.length > 0 ||
+         timersRunning;
+}
+
+function confirmLeavingActiveGame(actionLabel = 'leave this game') {
+  if (!hasGameInProgress()) return true;
+  return window.confirm(`You are in the middle of a game. Are you sure you want to ${actionLabel}?`);
+}
+
+function abandonActiveGameForNavigation() {
+  if (!hasGameInProgress()) return;
+
+  if (gameMode === 'friend') {
+    exitFriendGame();
+    return;
+  }
+
+  cancelOwnerStockfishMove();
+  aiThinking = false;
+  stockfishPending = null;
+  stopTimers();
+  selectedSq = null;
+  legalMoves = [];
+  gameOver = true;
+
+  if (gameMode === 'practice') {
+    practiceType = null;
+    currentPracticeChallenge = null;
+    document.body?.classList.remove('practice-mode');
+    updatePracticePanel();
+  }
+
+  updateTimerActiveState();
+  updateBoardControls();
+  updateStatusBar();
 }
 
 /* ══════════════════════════════════════════
@@ -585,6 +638,8 @@ function handleBoardNewGameClick() {
     openPlayOnlineModal();
     return;
   }
+  if (!confirmLeavingActiveGame('start a new game')) return;
+  abandonActiveGameForNavigation();
   newGame();
 }
 
@@ -2249,6 +2304,8 @@ function practiceLabel(type = practiceType) {
 }
 
 function startPractice(type, difficulty = null, challengeIndex = 0) {
+  if (!confirmLeavingActiveGame('start practice mode')) return;
+  abandonActiveGameForNavigation();
   if (gameMode === 'friend') exitFriendGame();
   hideInGameChat();
   closeModal('practiceModal');
@@ -3529,6 +3586,10 @@ function setGameMode(mode) {
     openPlayOnlineModal();
     return;
   }
+
+  const modeLabel = mode === 'ai' ? 'start an AI game' : 'start a local game';
+  if (!confirmLeavingActiveGame(modeLabel)) return;
+  abandonActiveGameForNavigation();
   
   if (gameMode === 'friend') {
     exitFriendGame();
@@ -4347,11 +4408,15 @@ async function deleteGuestAccount() {
 }
 
 function signOutUser() {
+  if (!confirmLeavingActiveGame('sign out and leave this game')) return false;
+  abandonActiveGameForNavigation();
+
   if (currentUser && currentUser.isAnonymous) {
     deleteGuestAccount().catch(err => console.error('Guest sign out cleanup error:', err));
-    return;
+    return true;
   }
   firebase.auth().signOut().catch(err => console.error('Sign out error:', err));
+  return true;
 }
 
 /* ══════════════════════════════════════════
@@ -6071,6 +6136,8 @@ function findMatch(isRanked = false) {
     alert('Create an account to play ranked games.');
     return;
   }
+  if (!confirmLeavingActiveGame('search for a new match')) return;
+  abandonActiveGameForNavigation();
 
   const uid = currentUser.uid;
   activeMatchmakingRanked = isRanked;
@@ -6469,6 +6536,8 @@ async function loadAllAccountLeaderboardRows() {
 function createFriendGame() {
   if (!db) { alert('Firebase not initialized. Please refresh the page.'); return; }
   if (!currentUser) { openAuthModal('signup'); return; }
+  if (!confirmLeavingActiveGame('create a new online game')) return;
+  abandonActiveGameForNavigation();
 
   // Resolve color: random picks w or b at equal probability
   let resolvedColor = createColorChoice;
@@ -6533,6 +6602,8 @@ function joinFriendGame() {
     errorEl.style.display = 'block';
     return;
   }
+  if (!confirmLeavingActiveGame('join another online game')) return;
+  abandonActiveGameForNavigation();
 
   db.ref(`games/${code}`).once('value').then(snapshot => {
     if (!snapshot.exists()) {
@@ -6947,6 +7018,12 @@ function initFirebaseWithRetry(attempts = 0) {
     console.error('Firebase SDK failed to load after 10 attempts');
   }
 }
+
+window.addEventListener('beforeunload', event => {
+  if (!hasGameInProgress()) return;
+  event.preventDefault();
+  event.returnValue = '';
+});
 
 // Wait for Firebase SDK to be available
 if (document.readyState === 'loading') {
