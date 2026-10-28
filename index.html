@@ -6,7 +6,7 @@
   <title>DigiChess.com — Play Chess Online</title>
   <link rel="icon" type="image/png" href="assets/digichess-logo-badge.png" />
   <link rel="apple-touch-icon" href="assets/digichess-logo-badge.png" />
-  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="style.css?v=20261028" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
   <!-- Firebase SDK (Compat version for <script> tags) -->
@@ -304,6 +304,14 @@
       <div class="card" id="aiSettingsCard" style="display:none;">
         <h3 class="card-title">Stockfish AI</h3>
         <div class="ai-settings">
+          <div class="ai-quick-guide" aria-label="How to play against Stockfish">
+            <strong>How to move</strong>
+            <ol>
+              <li>Select one of your white pieces.</li>
+              <li>Select a highlighted square to move there.</li>
+              <li>Wait for Stockfish to play Black.</li>
+            </ol>
+          </div>
           <label class="ai-setting-label" for="aiDifficultySelect">Difficulty</label>
           <select class="timer-select" id="aiDifficultySelect" onchange="changeAIDifficulty()" style="width:100%;">
             <option value="beginner">Beginner</option>
@@ -423,8 +431,16 @@
         </select>
         <h4 class="practice-title" id="practiceTitle">Choose a challenge</h4>
         <p class="practice-objective" id="practiceObjective"></p>
+        <div class="practice-steps" aria-label="Practice instructions">
+          <strong>What to do</strong>
+          <ol>
+            <li>Read the goal.</li>
+            <li>Select a piece, then a highlighted square.</li>
+            <li>Use Hint if you get stuck.</li>
+          </ol>
+        </div>
         <p class="practice-objective" id="practiceLessonNote" style="display:none;"></p>
-        <div class="practice-feedback" id="practiceFeedback">Make the best move on the board.</div>
+        <div class="practice-feedback" id="practiceFeedback" role="status" aria-live="polite">Select a piece to begin.</div>
         <p class="practice-explanation" id="practiceExplanation" style="display:none;"></p>
         <div class="practice-actions">
           <button class="btn btn-sm btn-ghost" id="practiceHintBtn" onclick="showPracticeHint()">Hint</button>
@@ -675,40 +691,40 @@
         <h2 class="modal-title" style="margin-bottom:0;">Practice Mode</h2>
         <button class="modal-close-btn" onclick="closeModal('practiceModal')" title="Close">✕</button>
       </div>
-      <p class="modal-sub practice-hub-sub">Choose a training path and build sharper chess habits move by move.</p>
+      <p class="modal-sub practice-hub-sub">Choose an activity. You can return here at any time with Go Back.</p>
       <div class="practice-option-grid">
         <button class="practice-option-card" onclick="startPractice('dailyPuzzle')">
           <span class="practice-option-icon">★</span>
           <strong>Daily Puzzle Challenge</strong>
-          <span>Solve today’s featured puzzle.</span>
+          <span>Find the best move in today’s position.</span>
           <small>Beginner • Daily</small>
           <em>Start Challenge</em>
         </button>
         <button class="practice-option-card" onclick="showPracticeTacticsChoices()">
           <span class="practice-option-icon">♞</span>
           <strong>Tactical Trainer</strong>
-          <span>Practice forks, pins, skewers and tactics.</span>
+          <span>Win pieces with forks, pins and other tactics.</span>
           <small>Beginner to Advanced</small>
           <em>Choose Level</em>
         </button>
         <button class="practice-option-card" onclick="showPracticeMateChoices()">
           <span class="practice-option-icon">♚</span>
           <strong>Mate in X Trainer</strong>
-          <span>Find checkmates in 1, 2 or 3 moves.</span>
+          <span>Choose a level and find the checkmate.</span>
           <small>Mate Patterns</small>
           <em>Choose Depth</em>
         </button>
         <button class="practice-option-card" onclick="showPracticeOpeningChoices()">
           <span class="practice-option-icon">♜</span>
           <strong>Opening Trainer</strong>
-          <span>Learn common chess openings move by move.</span>
+          <span>Follow the correct first moves of an opening.</span>
           <small>Lesson Mode</small>
           <em>Choose Opening</em>
         </button>
       </div>
       <div class="practice-choice-panel" id="practiceTacticsChooser" style="display:none;">
         <h3>Tactical Trainer</h3>
-        <p>Choose a difficulty, then solve a tactical position from that set.</p>
+        <p>Choose a level, then find the move that wins material.</p>
         <div class="practice-choice-row">
           <button class="btn btn-sm btn-ghost" onclick="startPractice('tactics', 'Beginner')">Beginner</button>
           <button class="btn btn-sm btn-ghost" onclick="startPractice('tactics', 'Intermediate')">Intermediate</button>
@@ -717,7 +733,7 @@
       </div>
       <div class="practice-choice-panel" id="practiceMateChooser" style="display:none;">
         <h3>Mate in X Trainer</h3>
-        <p>Pick a mate depth. Mate in 2 and 3 use short move sequences.</p>
+        <p>Choose how many moves you have to checkmate the king.</p>
         <div class="practice-choice-row">
           <button class="btn btn-sm btn-ghost" onclick="startMatePractice(1)">Mate in 1</button>
           <button class="btn btn-sm btn-ghost" onclick="startMatePractice(2)">Mate in 2</button>
@@ -726,7 +742,7 @@
       </div>
       <div class="practice-choice-panel" id="practiceOpeningChooser" style="display:none;">
         <h3>Opening Lessons</h3>
-        <p>Select an opening to practise the main moves with feedback.</p>
+        <p>Choose an opening and follow its moves one step at a time.</p>
         <div class="practice-opening-list" id="practiceOpeningChoiceList"></div>
       </div>
     </div>
@@ -1172,6 +1188,6 @@
   ══════════════════════════════════════ -->
   <div id="notifContainer" aria-live="polite"></div>
 
-  <script src="script.js"></script>
+  <script src="script.js?v=20261028"></script>
 </body>
 </html>

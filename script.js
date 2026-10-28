@@ -142,6 +142,7 @@ let stockfishReady = false;
 let stockfishRequestId = 0;
 let stockfishPending = null;
 let aiDifficulty = 'medium';
+let stockfishConfiguredDifficulty = null;
 const SETTINGS_STORAGE_KEY = 'digichessUserSettings';
 const DEFAULT_USER_SETTINGS = {
   boardTheme: 'classic',
@@ -686,10 +687,19 @@ function updateBoardControls() {
 ══════════════════════════════════════════ */
 function renderBoard() {
   const boardEl = document.getElementById('chessboard');
+  if (!boardEl) return;
   boardEl.innerHTML = '';
 
   // Coordinate labels
   renderCoords();
+
+  // These values do not change while one board is being rendered. Calculating
+  // them once avoids repeating the full attack scan for every square.
+  const checkedKing = isKingInCheck(currentTurn) ? findKing(currentTurn) : null;
+  const legalMoveKeys = new Set(
+    userSettings.legalHighlights ? legalMoves.map(move => `${move.row}:${move.col}`) : []
+  );
+  const fragment = document.createDocumentFragment();
 
   for (let r = 0; r < 8; r++) {
     for (let c = 0; c < 8; c++) {
@@ -716,7 +726,7 @@ function renderBoard() {
       }
 
       // Legal moves
-      const lm = userSettings.legalHighlights ? legalMoves.find(m => m.row === dispRow && m.col === dispCol) : null;
+      const lm = legalMoveKeys.has(`${dispRow}:${dispCol}`);
       if (lm) {
         sq.classList.add(board[dispRow][dispCol] ? 'legal-capture' : 'legal-move');
       }
@@ -747,11 +757,8 @@ function renderBoard() {
       }
 
       // King in check highlight
-      if (isKingInCheck(currentTurn)) {
-        const kPos = findKing(currentTurn);
-        if (kPos && kPos.row === dispRow && kPos.col === dispCol) {
-          sq.classList.add('in-check');
-        }
+      if (checkedKing && checkedKing.row === dispRow && checkedKing.col === dispCol) {
+        sq.classList.add('in-check');
       }
 
       // Piece
@@ -766,9 +773,10 @@ function renderBoard() {
       }
 
       sq.addEventListener('click', () => onSquareClick(dispRow, dispCol));
-      boardEl.appendChild(sq);
+      fragment.appendChild(sq);
     }
   }
+  boardEl.appendChild(fragment);
 }
 
 function renderCoords() {
@@ -1064,9 +1072,11 @@ function handleStockfishMessage(event) {
 
 function configureStockfishDifficulty(difficulty = aiDifficulty) {
   const config = AI_DIFFICULTIES[difficulty] || AI_DIFFICULTIES.medium;
+  if (stockfishConfiguredDifficulty === difficulty) return;
   sendStockfish('setoption name Skill Level value ' + config.skill);
   sendStockfish('setoption name Hash value 16');
   sendStockfish('isready');
+  stockfishConfiguredDifficulty = difficulty;
 }
 
 function makeAIMove() {
@@ -1083,7 +1093,6 @@ function makeAIMove() {
   updateBoardControls();
 
   configureStockfishDifficulty();
-  sendStockfish('ucinewgame');
   sendStockfish('position fen ' + fen);
   sendStockfish(`go depth ${config.depth} movetime ${config.movetime}`);
 }
@@ -2421,7 +2430,7 @@ function loadPracticeChallenge(challenge) {
     loadFenPosition(challenge.fen);
   }
 
-  setPracticeFeedback(practiceType === 'opening' ? 'Play the highlighted line one move at a time.' : getPracticeInitialFeedback(), 'neutral');
+  setPracticeFeedback(practiceType === 'opening' ? 'Your turn: select a white piece and follow the opening line.' : getPracticeInitialFeedback(), 'neutral');
   renderBoard();
   renderMoveHistory();
   updateStatusBar();
@@ -2490,7 +2499,7 @@ function handlePracticeMoveComplete(actualMove) {
   if (practiceApplyingAutoMove) {
     practiceSolutionIndex++;
     practiceFeedbackState = 'neutral';
-    setPracticeFeedback('Your turn. Find the next opening move.', 'neutral');
+    setPracticeFeedback('Your turn: select a piece and find the next opening move.', 'neutral');
     updatePracticePanel();
     return;
   }
@@ -2522,7 +2531,7 @@ function checkPracticeMove(actualMove) {
   practiceHintMove = null;
   practiceCorrectMove = null;
   practiceFeedbackState = 'incorrect';
-  setPracticeFeedback('Not quite. Try again.', 'incorrect');
+  setPracticeFeedback('Not quite. The board has been reset, so try another move.', 'incorrect');
   updatePracticePanel();
   return false;
 }
@@ -2621,8 +2630,8 @@ function updatePracticePanel(showExplanation = false) {
 }
 
 function getPracticeInitialFeedback() {
-  if (practiceType === 'dailyPuzzle') return isDailyPracticeSolved(currentPracticeChallenge) ? 'Solved today. Try it again or move to another trainer.' : 'Today’s Puzzle is unsolved. Find the best move.';
-  return 'Make the best move on the board.';
+  if (practiceType === 'dailyPuzzle') return isDailyPracticeSolved(currentPracticeChallenge) ? 'Completed today. You can replay it or select another activity.' : 'Select a piece, then choose the best highlighted square.';
+  return 'Select a piece, then choose the best highlighted square.';
 }
 
 function getPracticeCorrectMessage() {
@@ -6833,15 +6842,14 @@ function setupGameListener(code, closeOnStart) {
       friendGameRef.once('value').then(processGameSnapshot).catch(err => {
         console.error('[SNAP] field listener fetch failed:', err);
       });
-    }, 50);
+    }, 120);
   };
   const turnRef = friendGameRef.child('currentTurn');
   turnRef.on('value', onRemoteFieldChange);
   gameFieldListeners.push({ ref: turnRef, event: 'value', handler: onRemoteFieldChange });
-  const histRef = friendGameRef.child('moveHistory');
-  histRef.on('child_added', onRemoteFieldChange);
-  gameFieldListeners.push({ ref: histRef, event: 'child_added', handler: onRemoteFieldChange });
-  ['board', 'updatedAt', 'lastMove', 'gameOver', 'gameOverReason', 'gameOverTitle', 'drawOffer', 'rematchRequest'].forEach(field => {
+  // The root value listener is authoritative. These two small listeners are a
+  // fallback for delayed browser connections without multiplying every update.
+  ['updatedAt', 'gameOver'].forEach(field => {
     const ref = friendGameRef.child(field);
     ref.on('value', onRemoteFieldChange);
     gameFieldListeners.push({ ref, event: 'value', handler: onRemoteFieldChange });
@@ -6852,7 +6860,7 @@ function setupGameListener(code, closeOnStart) {
     friendGameRef.once('value').then(processGameSnapshot).catch(err => {
       console.error('Game sync poll failed:', err);
     });
-  }, 1000);
+  }, 3000);
 }
 
 function syncMoveToFriend(notation) {
